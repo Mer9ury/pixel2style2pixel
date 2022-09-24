@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1,2 torchrun --nproc_per_node=3 scripts/train.py \
+torchrun --nproc_per_node=3 scripts/train.py \
 --dataset_type=ffhq_encode \
 --exp_dir=experiments/amp \
 --workers=4 \
