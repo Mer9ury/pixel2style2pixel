@@ -33,7 +33,6 @@ class Coach:
 		self.global_step = 0
 
 		self.device = torch.device(opts.rank)# TODO: Allow multiple GPU? currently using CUDA_VISIBLE_DEVICES
-		print(self.device)
 
 		if self.opts.use_wandb:
 			from utils.wandb_utils import WBLogger
@@ -131,7 +130,6 @@ class Coach:
 					loss, loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 				
 				self.optimizer.zero_grad()
-				print(loss)
 				self.scaler.scale(loss).backward()
 				self.scaler.unscale_(self.optimizer)
 
