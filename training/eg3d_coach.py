@@ -37,6 +37,7 @@ class Coach:
 		self.device = torch.device(opts.rank)# TODO: Allow multiple GPU? currently using CUDA_VISIBLE_DEVICES
 		torch.cuda.set_device(self.opts.rank)
 
+
 		if self.opts.use_wandb:
 			from utils.wandb_utils import WBLogger
 			self.wb_logger = WBLogger(self.opts)
@@ -134,7 +135,6 @@ class Coach:
 				x, y_cams = batch
 				y = copy.deepcopy(x)
 
-				
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 				# with torch.cuda.amp.autocast():
 				with torch.cuda.amp.autocast():
