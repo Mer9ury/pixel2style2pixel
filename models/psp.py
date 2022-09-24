@@ -35,8 +35,11 @@ class pSp(nn.Module):
 		# self.opts.n_styles = int(math.log(self.opts.output_size, 2)) * 2 - 2
 		self.opts.n_styles = 14
 		# Define architecture
+		self.device = torch.device(self.opts.rank)
 
 		self.encoder = self.set_encoder()
+
+		self.decoder = TriPlaneGenerator(*(), **init_kwargs).eval()
 		
 		self.face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
 		# Load weights if needed
@@ -64,27 +67,22 @@ class pSp(nn.Module):
 		else:
 
 			print('Loading encoders weights from irse50!')
-			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location=torch.device(self.opts.rank))
+			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location='cpu')
+			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location='cpu')['G_ema']
 			# decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location=torch.device(self.opts.rank))
+
+
+
+			self.decoder.neural_rendering_resolution = 128
 
 			# if input to encoder is not an RGB image, do not load the input layer weights
 			if self.opts.label_nc != 0:
 				encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if "input_layer" not in k}
 			
 			self.encoder.load_state_dict(encoder_ckpt, strict=False)
+			self.decoder.load_state_dict(decoder_ckpt,strict=False)
+
 			
-			# with dnnlib.util.open_url(model_paths['eg3d_ffhq']) as f:
-			# 	self.decoder = legacy.load_network_pkl(f)['G_ema']
-			with dnnlib.util.open_url(model_paths['eg3d_ffhq']) as f:
-				temp_decoder = legacy.load_network_pkl(f)['G_ema']
-
-			self.decoder = TriPlaneGenerator(*temp_decoder.init_args, **temp_decoder.init_kwargs).eval().requires_grad_(False)
-			misc.copy_params_and_buffers(temp_decoder, self.decoder, require_all=True)
-			self.decoder.neural_rendering_resolution = temp_decoder.neural_rendering_resolution
-			self.decoder.rendering_kwargs = temp_decoder.rendering_kwargs
-
-			self.decoder.requires_grad_(True)
-				
 			self.latent_avg = None
 			print("Done!")
 
@@ -114,12 +112,10 @@ class pSp(nn.Module):
 
 
 		input_is_latent = not input_code
-
-		with torch.cuda.amp.autocast(enabled=False):
-			if y_cams:
-				images = self.decoder.synthesis(codes, y_cams)['image']
-			else:
-				images = self.decoder.synthesis(codes, camera_params)['image']
+		if y_cams:
+			images = self.decoder.synthesis(codes, y_cams)['image']
+		else:
+			images = self.decoder.synthesis(codes, camera_params)['image']
 			
 		if resize:
 			images = self.face_pool(images)
