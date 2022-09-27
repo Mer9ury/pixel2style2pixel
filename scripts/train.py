@@ -42,6 +42,9 @@ def main():
 
 	torch.cuda.set_device(local_rank)
 	print(local_rank)
+
+	# os.environ['MASTER_ADDR'] = 'localhost'
+	# os.environ['MASTER_PORT'] = '25455'
 	dist.init_process_group(backend = "nccl", init_method='env://')
 
 	rank = dist.get_rank()

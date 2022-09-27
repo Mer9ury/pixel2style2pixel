@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import json
 
 from utils import common, train_utils
-from criteria import id_loss, w_norm, moco_loss
+from criteria import id_loss, w_norm, moco_loss, geodesic_loss
 from configs import data_configs
 from datasets.images_dataset import ImagesDataset
 from datasets.eg3d_dataset import EG3DDataset
@@ -45,6 +45,7 @@ class Coach:
 		# Initialize network
 
 		self.net = pSp(self.opts)
+		# self.net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.net)
 		self.net.to(self.device)
 		
 
@@ -77,6 +78,8 @@ class Coach:
 			self.w_norm_loss = w_norm.WNormLoss(start_from_latent_avg=self.opts.start_from_latent_avg)
 		if self.opts.moco_lambda > 0:
 			self.moco_loss = moco_loss.MocoLoss().cuda(self.opts.rank).eval()
+		if self.opts.cams_lambda > 0:
+			self.geodesic_loss = geodesic_loss.GeodesicLoss().cuda()
 
 		# Initialize optimizer
 		self.optimizer = self.configure_optimizers()
@@ -137,16 +140,16 @@ class Coach:
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 				# with torch.cuda.amp.autocast():
-				with torch.cuda.amp.autocast():
-					y_hat, cams, latent = self.net.forward(x, return_latents=True)
-					loss, loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+
+				y_hat, cams, latent = self.net.forward(x, return_latents=True)
+				loss, loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 
 				self.optimizer.zero_grad()
-				# loss.backward()
-				# self.optimizer.step()
-				self.scaler.scale(loss).backward()
-				self.scaler.step(self.optimizer)
-				self.scaler.update()
+				loss.backward()
+				self.optimizer.step()
+				# self.scaler.scale(loss).backward()
+				# self.scaler.step(self.optimizer)
+				# self.scaler.update()
 
 				if self.opts.rank == 0:
 					# Logging related
@@ -190,9 +193,8 @@ class Coach:
 
 			with torch.no_grad():
 				x, y, y_cams = x.to(self.device).float(),y.to(self.device).float(), y_cams.to(self.device).float()
-				with torch.cuda.amp.autocast():
-					y_hat, cams, latent = self.net.forward(x, return_latents=True)
-					loss, cur_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+				y_hat, cams, latent = self.net.forward(x, return_latents=True)
+				loss, cur_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 			agg_loss_dict.append(cur_loss_dict)
 
 			# Logging related
@@ -296,7 +298,11 @@ class Coach:
 			loss_dict['id_improve'] = float(sim_improvement)
 			loss += loss_moco * self.opts.moco_lambda
 		if self.opts.cams_lambda > 0:
-			loss_cams = F.mse_loss(cams, y_cams)
+			extrinsics = cams[:,:16].reshape(-1,4,4)
+			y_extrinsics = y_cams[:,:16].reshape(-1,4,4)
+			loss_angle = self.geodesic_loss(extrinsics[:,:3,:3],y_extrinsics[:,:3,:3])
+			loss_trans = F.mse_loss(extrinsics[:,:3,3], y_extrinsics[:,:3,3])
+			loss_cams = loss_angle + loss_trans
 			loss_dict['loss_cams'] = float(loss_cams)
 			loss += loss_cams * self.opts.cams_lambda
 

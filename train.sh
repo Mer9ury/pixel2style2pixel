@@ -1,9 +1,9 @@
-torchrun --nproc_per_node=3 scripts/train.py \
+OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 scripts/train.py \
 --dataset_type=ffhq_encode \
---exp_dir=experiments/amp \
+--exp_dir=experiments/0927_test \
 --workers=4 \
---batch_size=3 \
---test_batch_size=3 \
+--batch_size=2 \
+--test_batch_size=2 \
 --test_workers=4 \
 --val_interval=5000 \
 --save_interval=10000 \

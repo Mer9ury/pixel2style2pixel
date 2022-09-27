@@ -17,12 +17,12 @@ class TrainOptions:
 		self.parser.add_argument('--label_nc', default=0, type=int, help='Number of input label channels to the psp encoder')
 		self.parser.add_argument('--output_size', default=512, type=int, help='Output size of generator')
 
-		self.parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
-		self.parser.add_argument('--test_batch_size', default=2, type=int, help='Batch size for testing and inference')
+		self.parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
+		self.parser.add_argument('--test_batch_size', default=4, type=int, help='Batch size for testing and inference')
 		self.parser.add_argument('--workers', default=8, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')
 
-		self.parser.add_argument('--learning_rate', default=0.00001, type=float, help='Optimizer learning rate')
+		self.parser.add_argument('--learning_rate', default=0.000025, type=float, help='Optimizer learning rate')
 		self.parser.add_argument('--optim_name', default='ranger', type=str, help='Which optimizer to use')
 		self.parser.add_argument('--train_decoder', default=False, type=bool, help='Whether to train the decoder model')
 		self.parser.add_argument('--start_from_latent_avg', action='store_true', help='Whether to add average latent vector to generate codes from encoder.')

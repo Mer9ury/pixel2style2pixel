@@ -1,6 +1,6 @@
 from collections import namedtuple
 import torch
-from torch.nn import Conv2d, BatchNorm2d, PReLU, ReLU, Sigmoid, MaxPool2d, AdaptiveAvgPool2d, Sequential, Module
+from torch.nn import Conv2d, BatchNorm2d, PReLU, ReLU, Sigmoid, MaxPool2d, AdaptiveAvgPool2d, Sequential, Module, GroupNorm
 
 """
 ArcFace implementation from [TreB1eN](https://github.com/TreB1eN/InsightFace_Pytorch)
@@ -110,6 +110,30 @@ class bottleneck_IR_SE(Module):
 			PReLU(depth),
 			Conv2d(depth, depth, (3, 3), stride, 1, bias=False),
 			BatchNorm2d(depth),
+			SEModule(depth, 16)
+		)
+
+	def forward(self, x):
+		shortcut = self.shortcut_layer(x)
+		res = self.res_layer(x)
+		return res + shortcut
+
+class bottleneck_IR_SE_GN(Module):
+	def __init__(self, in_channel, depth, stride):
+		super(bottleneck_IR_SE_GN, self).__init__()
+		if in_channel == depth:
+			self.shortcut_layer = MaxPool2d(1, stride)
+		else:
+			self.shortcut_layer = Sequential(
+				Conv2d(in_channel, depth, (1, 1), stride, bias=False),
+				GroupNorm(depth//2,depth)
+			)
+		self.res_layer = Sequential(
+			GroupNorm(in_channel//2, in_channel),
+			Conv2d(in_channel, depth, (3, 3), (1, 1), 1, bias=False),
+			PReLU(depth),
+			Conv2d(depth, depth, (3, 3), stride, 1, bias=False),
+			GroupNorm(depth//2, depth),
 			SEModule(depth, 16)
 		)
 

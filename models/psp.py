@@ -71,8 +71,6 @@ class pSp(nn.Module):
 			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location='cpu')['G_ema']
 			# decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location=torch.device(self.opts.rank))
 
-
-
 			self.decoder.neural_rendering_resolution = 128
 
 			# if input to encoder is not an RGB image, do not load the input layer weights
@@ -112,10 +110,12 @@ class pSp(nn.Module):
 
 
 		input_is_latent = not input_code
-		if y_cams:
-			images = self.decoder.synthesis(codes, y_cams)['image']
-		else:
-			images = self.decoder.synthesis(codes, camera_params)['image']
+
+		with torch.cuda.amp.autocast(enabled=False):
+			if y_cams:
+				images = self.decoder.synthesis(codes, y_cams)['image']
+			else:
+				images = self.decoder.synthesis(codes, camera_params)['image']
 			
 		if resize:
 			images = self.face_pool(images)
