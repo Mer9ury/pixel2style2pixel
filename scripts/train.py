@@ -28,6 +28,7 @@ from training.eg3d_coach import Coach
 def main():
 
 	local_rank = int(os.environ['LOCAL_RANK'])
+	torch.cuda.empty_cache()
 
 	# torch.autograd.set_detect_anomaly(True)
 	opts = TrainOptions().parse()

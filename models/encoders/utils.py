@@ -16,7 +16,15 @@ import json
 import argparse
 import scipy.io
 import sys
+from torch.nn import BatchNorm2d, GroupNorm
 
+
+def get_norm(norm, C):
+	if norm == 'BN':
+		return BatchNorm2d(C)
+	if norm == 'GN':
+		return GroupNorm(C//2, C)
+        
 def compute_rotation(angles, rank):
         """
         Return:

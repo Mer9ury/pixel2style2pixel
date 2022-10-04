@@ -40,6 +40,7 @@ class pSp(nn.Module):
 		self.encoder = self.set_encoder()
 
 		self.decoder = TriPlaneGenerator(*(), **init_kwargs).eval()
+		self.decoder.neural_rendering_resolution = self.opts.render_resolution
 		
 		self.face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
 		# Load weights if needed
@@ -60,25 +61,26 @@ class pSp(nn.Module):
 	def load_weights(self):
 		if self.opts.checkpoint_path is not None:
 			print('Loading pSp from checkpoint: {}'.format(self.opts.checkpoint_path))
-			ckpt = torch.load(self.opts.checkpoint_path, map_location=torch.device(self.opts.rank))
+			ckpt = torch.load(self.opts.checkpoint_path, map_location='cpu')
+
 			self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
 			self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
-			self.__load_latent_avg(ckpt)
+
+			self.latent_avg = None
+			
+			# self.__load_latent_avg(ckpt)
 		else:
 
 			print('Loading encoders weights from irse50!')
 			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location='cpu')
 			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location='cpu')['G_ema']
-			# decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location=torch.device(self.opts.rank))
-
-			self.decoder.neural_rendering_resolution = 128
 
 			# if input to encoder is not an RGB image, do not load the input layer weights
 			if self.opts.label_nc != 0:
 				encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if "input_layer" not in k}
 			
 			self.encoder.load_state_dict(encoder_ckpt, strict=False)
-			self.decoder.load_state_dict(decoder_ckpt,strict=False)
+			self.decoder.load_state_dict(decoder_ckpt, strict=False)
 
 			
 			self.latent_avg = None
@@ -110,12 +112,10 @@ class pSp(nn.Module):
 
 
 		input_is_latent = not input_code
-
-		with torch.cuda.amp.autocast(enabled=False):
-			if y_cams:
-				images = self.decoder.synthesis(codes, y_cams)['image']
-			else:
-				images = self.decoder.synthesis(codes, camera_params)['image']
+		if y_cams:
+			images = self.decoder.synthesis(codes, y_cams)['image']
+		else:
+			images = self.decoder.synthesis(codes, camera_params)['image']
 			
 		if resize:
 			images = self.face_pool(images)

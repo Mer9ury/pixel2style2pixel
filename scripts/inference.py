@@ -43,7 +43,7 @@ def run():
     if 'learn_in_w' not in opts:
         opts['learn_in_w'] = False
     if 'output_size' not in opts:
-        opts['output_size'] = 1024
+        opts['output_size'] = 512
     opts = Namespace(**opts)
 
     net = pSp(opts)

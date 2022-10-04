@@ -35,6 +35,7 @@ class Coach:
 		self.global_step = 0
 
 		self.device = torch.device(opts.rank)# TODO: Allow multiple GPU? currently using CUDA_VISIBLE_DEVICES
+		self.opts.device = self.device
 		torch.cuda.set_device(self.opts.rank)
 
 

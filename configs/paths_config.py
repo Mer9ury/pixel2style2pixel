@@ -17,5 +17,5 @@ model_paths = {
 	'shape_predictor': 'shape_predictor_68_face_landmarks.dat',
 	'moco': 'pretrained_models/moco_v2_800ep_pretrain.pth.tar',
 	'eg3d_ffhq': 'pretrained_models/ffhq512-128.pkl',
-	'eg3d_pth': 'pretrained_models/ffhq512-128.pth'
+	'eg3d_pth': 'pretrained_models/ffhq512-64.pth'
 }

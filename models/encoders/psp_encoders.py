@@ -4,9 +4,9 @@ import torch.nn.functional as F
 from torch import nn
 from torch.nn import Linear, Conv2d, BatchNorm2d, PReLU, Sequential, Module, GroupNorm
 
-from models.encoders.helpers import get_blocks, Flatten, bottleneck_IR, bottleneck_IR_SE, bottleneck_IR_SE_GN
+from models.encoders.helpers import get_blocks, Flatten, bottleneck_IR, bottleneck_IR_SE
 from models.stylegan2.model import EqualLinear
-from .utils import angle_trans_to_cams
+from .utils import angle_trans_to_cams, get_norm
 
 
 class GradualStyleBlock(Module):
@@ -42,16 +42,17 @@ class GradualStyleEncoder(Module):
         if mode == 'ir':
             unit_module = bottleneck_IR
         elif mode == 'ir_se':
-            unit_module = bottleneck_IR_SE_GN
+            unit_module = bottleneck_IR_SE
         self.input_layer = Sequential(Conv2d(opts.input_nc, 64, (3, 3), 1, 1, bias=False),
-                                      GroupNorm(32, 64),
+                                      get_norm(norm = opts.norm, C = 64),
                                       PReLU(64))
         modules = []
         for block in blocks:
             for bottleneck in block:
                 modules.append(unit_module(bottleneck.in_channel,
                                            bottleneck.depth,
-                                           bottleneck.stride))
+                                           bottleneck.stride,
+                                           opts.norm))
         self.body = Sequential(*modules)
 
         self.styles = nn.ModuleList()

@@ -15,6 +15,7 @@ class TrainOptions:
 		self.parser.add_argument('--encoder_type', default='GradualStyleEncoder', type=str, help='Which encoder to use')
 		self.parser.add_argument('--input_nc', default=3, type=int, help='Number of input image channels to the psp encoder')
 		self.parser.add_argument('--label_nc', default=0, type=int, help='Number of input label channels to the psp encoder')
+		self.parser.add_argument('--render_resolution', default=128, type=int, help='Resoloution of neural rendering result')
 		self.parser.add_argument('--output_size', default=512, type=int, help='Output size of generator')
 
 		self.parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
@@ -22,11 +23,12 @@ class TrainOptions:
 		self.parser.add_argument('--workers', default=8, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')
 
-		self.parser.add_argument('--learning_rate', default=0.000025, type=float, help='Optimizer learning rate')
+		self.parser.add_argument('--learning_rate', default=0.0001, type=float, help='Optimizer learning rate')
 		self.parser.add_argument('--optim_name', default='ranger', type=str, help='Which optimizer to use')
 		self.parser.add_argument('--train_decoder', default=False, type=bool, help='Whether to train the decoder model')
 		self.parser.add_argument('--start_from_latent_avg', action='store_true', help='Whether to add average latent vector to generate codes from encoder.')
 		self.parser.add_argument('--learn_in_w', action='store_true', help='Whether to learn in w space instead of w+')
+		self.parser.add_argument('--norm', default = 'GN', type=str, help='which normalization to use at encoder model')
 
 		self.parser.add_argument('--lpips_lambda', default=0.8, type=float, help='LPIPS loss multiplier factor')
 		self.parser.add_argument('--id_lambda', default=0, type=float, help='ID loss multiplier factor')
