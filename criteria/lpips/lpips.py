@@ -21,6 +21,9 @@ class LPIPS(nn.Module):
 
         # pretrained network
         self.net = get_network(net_type).cuda(rank)
+        for param in self.net.parameters():
+            param.requires_grad = False
+        self.net.eval()
 
         # linear layers
         self.lin = LinLayers(self.net.n_channels_list)

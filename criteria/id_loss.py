@@ -12,6 +12,10 @@ class IDLoss(nn.Module):
         self.facenet.load_state_dict(torch.load(model_paths['ir_se50'],map_location=torch.device(rank)))
         self.face_pool = torch.nn.AdaptiveAvgPool2d((112, 112))
 
+        for module in [self.facenet, self.face_pool]:
+            for param in module.parameters():
+                param.requires_grad = False
+
         self.facenet.eval()
 
     def extract_feats(self, x):
