@@ -17,6 +17,7 @@ from datasets.inference_dataset import InferenceDataset
 from utils.common import tensor2im, log_input_image
 from options.test_options import TestOptions
 from models.psp import pSp
+from models.eg3d.camera_utils import LookAtPoseSampler, FOV_to_intrinsics
 
 
 def run():
@@ -73,7 +74,7 @@ def run():
         with torch.no_grad():
             input_cuda = input_batch.cuda().float()
             tic = time.time()
-            result_batch = run_on_batch(input_cuda, net, opts)
+            result_batch = run_on_batch_samples(input_cuda, net, opts)
             toc = time.time()
             global_time.append(toc - tic)
 
@@ -97,6 +98,7 @@ def run():
                 Image.fromarray(res).save(os.path.join(out_path_coupled, os.path.basename(im_path)))
 
             im_save_path = os.path.join(out_path_results, os.path.basename(im_path))
+            
             Image.fromarray(np.array(result)).save(im_save_path)
 
             global_i += 1
@@ -111,7 +113,7 @@ def run():
 
 def run_on_batch(inputs, net, opts):
     if opts.latent_mask is None:
-        result_batch = net(inputs, randomize_noise=False, resize=opts.resize_outputs)
+        result_batch = net.encoder(inputs, randomize_noise=False, resize=opts.resize_outputs)
     else:
         latent_mask = [int(l) for l in opts.latent_mask.split(",")]
         result_batch = []
@@ -130,6 +132,29 @@ def run_on_batch(inputs, net, opts):
             result_batch.append(res)
         result_batch = torch.cat(result_batch, dim=0)
     return result_batch
+
+def run_on_batch_samples(inputs, net, opts):
+    codes, cams = net.encoder(inputs)
+    print(codes.shape)
+    ws = codes + net.latent_avg.repeat(codes.shape[0], 1)
+    G = net.decoder
+    angle_p = -0.2
+    intrinsics = FOV_to_intrinsics(18.837, device=opts.device)
+    img = G.synthesis(ws, cams)['image']
+    imgs = [img]
+    for angle_y, angle_p in [(.4, angle_p), (0, angle_p), (-.4, angle_p)]:
+        cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=opts.device)
+        cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+        cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=opts.device)
+        conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=opts.device)
+        camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+        conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+
+        img = G.synthesis(ws, camera_params)['image']
+        imgs.append(img)
+    img = torch.cat(imgs, dim=2)
+
+    return img
 
 
 if __name__ == '__main__':

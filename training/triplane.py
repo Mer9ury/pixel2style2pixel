@@ -106,7 +106,6 @@ class TriPlaneGenerator(torch.nn.Module):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
         return self.synthesis(ws, c, update_emas=update_emas, neural_rendering_resolution=neural_rendering_resolution, cache_backbone=cache_backbone, use_cached_backbone=use_cached_backbone, **synthesis_kwargs)
 
-
 from training.networks_stylegan2 import FullyConnectedLayer
 
 class OSGDecoder(torch.nn.Module):

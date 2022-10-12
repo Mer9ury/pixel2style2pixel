@@ -50,6 +50,8 @@ class pSp(nn.Module):
 	def set_encoder(self):
 		if self.opts.encoder_type == 'GradualStyleEncoder':
 			encoder = psp_encoders.GradualStyleEncoder(50, 'ir_se', self.opts)
+		elif self.opts.encoder_type == 'Encoder4Editing':
+			encoder = psp_encoders.Encoder4Editing(50, 'ir_se', self.opts)
 		elif self.opts.encoder_type == 'BackboneEncoderUsingLastLayerIntoW':
 			encoder = psp_encoders.BackboneEncoderUsingLastLayerIntoW(50, 'ir_se', self.opts)
 		elif self.opts.encoder_type == 'BackboneEncoderUsingLastLayerIntoWPlus':
@@ -66,9 +68,9 @@ class pSp(nn.Module):
 			self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
 			self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
 
-			self.latent_avg = None
+			# self.latent_avg = None
 			
-			# self.__load_latent_avg(ckpt)
+			self.__load_latent_avg(ckpt)
 		else:
 
 			print('Loading encoders weights from irse50!')

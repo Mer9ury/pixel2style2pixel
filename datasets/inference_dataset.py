@@ -6,7 +6,7 @@ from utils import data_utils
 class InferenceDataset(Dataset):
 
 	def __init__(self, root, opts, transform=None):
-		self.paths = sorted(data_utils.make_dataset(root))
+		self.paths = sorted(data_utils.make_dataset(root))[:1000]
 		self.transform = transform
 		self.opts = opts
 

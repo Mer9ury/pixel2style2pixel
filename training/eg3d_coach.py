@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
 import torch
-from torch import nn
+from torch import nn, autograd
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
@@ -16,6 +16,9 @@ from criteria import id_loss, w_norm, moco_loss, geodesic_loss
 from configs import data_configs
 from datasets.images_dataset import ImagesDataset
 from datasets.eg3d_dataset import EG3DDataset
+from models.latent_codes_pool import LatentCodesPool
+from models.encoders.psp_encoders import ProgressiveStage
+from models.discriminator import LatentCodesDiscriminator
 from criteria.lpips.lpips import LPIPS
 from models.psp import pSp
 from training.ranger import Ranger
@@ -65,7 +68,6 @@ class Coach:
 			c_in = torch.zeros((int(1e5),25)).to(self.device)
 
 			self.net.latent_avg = self.net.decoder.mapping(latent_in,c_in).mean(0,keepdim=True)[0].detach()
-
 		# Initialize loss
 		if self.opts.id_lambda > 0 and self.opts.moco_lambda > 0:
 			raise ValueError('Both ID and MoCo loss have lambdas > 0! Please select only one to have non-zero lambda!')
@@ -81,14 +83,21 @@ class Coach:
 			self.moco_loss = moco_loss.MocoLoss().cuda(self.opts.rank).eval()
 		if self.opts.cams_lambda > 0:
 			self.geodesic_loss = geodesic_loss.GeodesicLoss().cuda()
+		
+		if self.opts.w_discriminator_lambda > 0:
+			self.discriminator = LatentCodesDiscriminator(512, 4).to(self.opts.rank)
+			self.discriminator_optimizer = torch.optim.Adam(list(self.discriminator.parameters()),
+															lr=opts.w_discriminator_lr)
+			self.real_w_pool = LatentCodesPool(self.opts.w_pool_size)
+			self.fake_w_pool = LatentCodesPool(self.opts.w_pool_size)
 
 		# Initialize optimizer
 		self.optimizer = self.configure_optimizers()
 
-		self.scaler = torch.cuda.amp.GradScaler()
-
 		# Initialize dataset
 		self.train_dataset, self.test_dataset = self.configure_datasets()
+
+		
 		
 		if opts.distributed:
 			self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,num_replicas=self.opts.num_gpus,
@@ -126,31 +135,33 @@ class Coach:
 			self.opts.save_interval = self.opts.max_steps
 
 		print(f"GPU {self.opts.rank} intialization is done.")
-		time.sleep(5)
 
 	def train(self):
 		print(f"At GPU {self.opts.rank}, Train starts.")
 		self.net.train()
 		epoch = 0
+		if self.opts.progressive_steps:
+			self.check_for_progressive_training_update()
 		while self.global_step < self.opts.max_steps:
 			self.train_dataloader.sampler.set_epoch(epoch)
 			
 			for batch_idx, batch in enumerate(tqdm(self.train_dataloader)):
 				x, y_cams = batch
 				y = copy.deepcopy(x)
+				loss_dict = {}
+				if self.is_training_discriminator():
+					loss_dict = self.train_discriminator(batch)
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 				# with torch.cuda.amp.autocast():
 
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
-				loss, loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+				loss_dict = {**loss_dict, **enc_loss_dict}
 
 				self.optimizer.zero_grad()
 				loss.backward()
 				self.optimizer.step()
-				# self.scaler.scale(loss).backward()
-				# self.scaler.step(self.optimizer)
-				# self.scaler.update()
 
 				if self.opts.rank == 0:
 					# Logging related
@@ -182,6 +193,8 @@ class Coach:
 					break
 
 				self.global_step += 1
+				if self.opts.progressive_steps:
+					self.check_for_progressive_training_update()
 				
 			epoch += 1
 
@@ -191,11 +204,15 @@ class Coach:
 		for batch_idx, batch in enumerate(self.test_dataloader):
 			x, y_cams = batch
 			y = copy.deepcopy(x)
+			cur_loss_dict = {}
+			if self.is_training_discriminator():
+				cur_loss_dict = self.validate_discriminator(batch)
 
 			with torch.no_grad():
 				x, y, y_cams = x.to(self.device).float(),y.to(self.device).float(), y_cams.to(self.device).float()
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
-				loss, cur_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
+				cur_loss_dict = {**cur_loss_dict,**enc_loss_dict}
 			agg_loss_dict.append(cur_loss_dict)
 
 			# Logging related
@@ -264,10 +281,30 @@ class Coach:
 		print(f"Number of test samples: {len(test_dataset)}")
 		return train_dataset, test_dataset
 
+	def check_for_progressive_training_update(self, is_resume_from_ckpt=False):
+		for i in range(len(self.opts.progressive_steps)):
+			if is_resume_from_ckpt and self.global_step >= self.opts.progressive_steps[i]:  # Case checkpoint
+				self.net.encoder.set_progressive_stage(ProgressiveStage(i))
+			if self.global_step == self.opts.progressive_steps[i]:   # Case training reached progressive step
+				self.net.encoder.set_progressive_stage(ProgressiveStage(i))
+
 	def calc_loss(self, x, y, y_hat, latent, cams, y_cams):
 		loss_dict = {}
 		loss = 0.0
 		id_logs = None
+		if self.is_training_discriminator():  # Adversarial loss
+			loss_disc = 0.
+			dims_to_discriminate = self.get_dims_to_discriminate() if self.is_progressive_training() else \
+				list(range(self.net.decoder.n_latent))
+
+			for i in dims_to_discriminate:
+				w = latent[:, i, :]
+				fake_pred = self.discriminator(w)
+				loss_disc += F.softplus(-fake_pred).mean()
+			loss_disc /= len(dims_to_discriminate)
+			loss_dict['encoder_discriminator_loss'] = float(loss_disc)
+			loss += self.opts.w_discriminator_lambda * loss_disc
+			
 		if self.opts.id_lambda > 0:
 			loss_id, sim_improvement, id_logs = self.id_loss(y_hat, y, x)
 			loss_dict['loss_id'] = float(loss_id)
@@ -281,14 +318,6 @@ class Coach:
 			loss_lpips = self.lpips_loss(y_hat, y)
 			loss_dict['loss_lpips'] = float(loss_lpips)
 			loss += loss_lpips * self.opts.lpips_lambda
-		if self.opts.lpips_lambda_crop > 0:
-			loss_lpips_crop = self.lpips_loss(y_hat[:, :, 35:223, 32:220], y[:, :, 35:223, 32:220])
-			loss_dict['loss_lpips_crop'] = float(loss_lpips_crop)
-			loss += loss_lpips_crop * self.opts.lpips_lambda_crop
-		if self.opts.l2_lambda_crop > 0:
-			loss_l2_crop = F.mse_loss(y_hat[:, :, 35:223, 32:220], y[:, :, 35:223, 32:220])
-			loss_dict['loss_l2_crop'] = float(loss_l2_crop)
-			loss += loss_l2_crop * self.opts.l2_lambda_crop
 		if self.opts.w_norm_lambda > 0:
 			loss_w_norm = self.w_norm_loss(latent, self.net.latent_avg)
 			loss_dict['loss_w_norm'] = float(loss_w_norm)
@@ -306,6 +335,20 @@ class Coach:
 			loss_cams = loss_angle + loss_trans
 			loss_dict['loss_cams'] = float(loss_cams)
 			loss += loss_cams * self.opts.cams_lambda
+
+		if self.opts.progressive_steps and self.net.encoder.progressive_stage.value != 14:  # delta regularization loss
+			total_delta_loss = 0
+			deltas_latent_dims = self.net.encoder.get_deltas_starting_dimensions()
+
+			first_w = latent[:, 0, :]
+			for i in range(1, self.net.encoder.progressive_stage.value + 1):
+				curr_dim = deltas_latent_dims[i]
+				delta = latent[:, curr_dim, :] - first_w
+				delta_loss = torch.norm(delta, self.opts.delta_norm, dim=1).mean()
+				loss_dict[f"delta{i}_loss"] = float(delta_loss)
+				total_delta_loss += delta_loss
+			loss_dict['total_delta_loss'] = float(total_delta_loss)
+			loss += self.opts.delta_norm_lambda * total_delta_loss
 
 		loss_dict['loss'] = float(loss)
 		return loss, loss_dict, id_logs
@@ -357,3 +400,104 @@ class Coach:
 		if self.opts.start_from_latent_avg:
 			save_dict['latent_avg'] = self.net.latent_avg
 		return save_dict
+
+	def get_dims_to_discriminate(self):
+		deltas_starting_dimensions = self.net.encoder.get_deltas_starting_dimensions()
+		return deltas_starting_dimensions[:self.net.encoder.progressive_stage.value + 1]
+
+	def is_progressive_training(self):
+		return self.opts.progressive_steps is not None
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Discriminator ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+	def is_training_discriminator(self):
+		return self.opts.w_discriminator_lambda > 0
+
+	@staticmethod
+	def discriminator_loss(real_pred, fake_pred, loss_dict):
+		real_loss = F.softplus(-real_pred).mean()
+		fake_loss = F.softplus(fake_pred).mean()
+
+		loss_dict['d_real_loss'] = float(real_loss)
+		loss_dict['d_fake_loss'] = float(fake_loss)
+
+		return real_loss + fake_loss
+
+	@staticmethod
+	def discriminator_r1_loss(real_pred, real_w):
+		grad_real, = autograd.grad(
+			outputs=real_pred.sum(), inputs=real_w, create_graph=True
+		)
+		grad_penalty = grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
+
+		return grad_penalty
+
+	@staticmethod
+	def requires_grad(model, flag=True):
+		for p in model.parameters():
+			p.requires_grad = flag
+
+	def train_discriminator(self, batch):
+		loss_dict = {}
+		x, _ = batch
+		x = x.to(self.device).float()
+		self.requires_grad(self.discriminator, True)
+
+		with torch.no_grad():
+			real_w, fake_w = self.sample_real_and_fake_latents(x)
+		real_pred = self.discriminator(real_w)
+		fake_pred = self.discriminator(fake_w)
+		loss = self.discriminator_loss(real_pred, fake_pred, loss_dict)
+		loss_dict['discriminator_loss'] = float(loss)
+
+		self.discriminator_optimizer.zero_grad()
+		loss.backward()
+		self.discriminator_optimizer.step()
+
+		# r1 regularization
+		d_regularize = self.global_step % self.opts.d_reg_every == 0
+		if d_regularize:
+			real_w = real_w.detach()
+			real_w.requires_grad = True
+			real_pred = self.discriminator(real_w)
+			r1_loss = self.discriminator_r1_loss(real_pred, real_w)
+
+			self.discriminator.zero_grad()
+			r1_final_loss = self.opts.r1 / 2 * r1_loss * self.opts.d_reg_every + 0 * real_pred[0]
+			r1_final_loss.backward()
+			self.discriminator_optimizer.step()
+			loss_dict['discriminator_r1_loss'] = float(r1_final_loss)
+
+		# Reset to previous state
+		self.requires_grad(self.discriminator, False)
+
+		return loss_dict
+
+	def validate_discriminator(self, test_batch):
+		with torch.no_grad():
+			loss_dict = {}
+			x, _ = test_batch
+			x = x.to(self.device).float()
+			real_w, fake_w = self.sample_real_and_fake_latents(x)
+			real_pred = self.discriminator(real_w)
+			fake_pred = self.discriminator(fake_w)
+			loss = self.discriminator_loss(real_pred, fake_pred, loss_dict)
+			loss_dict['discriminator_loss'] = float(loss)
+			return loss_dict
+
+	def sample_real_and_fake_latents(self, x):
+		sample_z = torch.randn(self.opts.batch_size, 512, device=self.device)
+		sample_c = torch.zeros(self.opts.batch_size,25).to(self.device)
+		real_w = self.net.decoder.mapping(sample_z,sample_c)[0]
+		fake_w, _ = self.net.encoder(x)
+		if self.opts.start_from_latent_avg:
+			fake_w = fake_w + self.net.latent_avg.repeat(fake_w.shape[0], 1, 1)
+		if self.is_progressive_training():  # When progressive training, feed only unique w's
+			dims_to_discriminate = self.get_dims_to_discriminate()
+			fake_w = fake_w[:, dims_to_discriminate, :]
+		if self.opts.use_w_pool:
+			real_w = self.real_w_pool.query(real_w)
+			fake_w = self.fake_w_pool.query(fake_w)
+		if fake_w.ndim == 3:
+			fake_w = fake_w[:, 0, :]
+		return real_w, fake_w

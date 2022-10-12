@@ -65,8 +65,8 @@ def compute_rotation(angles, rank):
 
 def fix_intrinsics(intrinsics):
     assert intrinsics.shape[1:] == (3, 3), intrinsics
-    intrinsics[:,0,0] = 1492.645/700
-    intrinsics[:,1,1] = 1492.645/700
+    intrinsics[:,0,0] = 2985.29/700
+    intrinsics[:,1,1] = 2985.29/700
     intrinsics[:,0,2] = 1/2
     intrinsics[:,1,2] = 1/2
     assert intrinsics[:,0,1].all() == 0
