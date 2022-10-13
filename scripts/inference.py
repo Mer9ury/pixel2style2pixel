@@ -142,7 +142,7 @@ def run_on_batch_samples(inputs, net, opts):
     intrinsics = FOV_to_intrinsics(18.837, device=opts.device)
     img = G.synthesis(ws, cams)['image']
     imgs = [img]
-    for angle_y, angle_p in [(.4, angle_p), (0, angle_p), (-.4, angle_p)]:
+    for angle_y, angle_p in [(.3, angle_p), (0, angle_p), (-.3, angle_p)]:
         cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=opts.device)
         cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
         cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=opts.device)

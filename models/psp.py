@@ -17,7 +17,6 @@ from training.triplane import TriPlaneGenerator
 import dnnlib as dnnlib
 from configs.eg3d_config import init_kwargs,rendering_kwargs
 import time
-from models.eg3d import legacy
 
 def get_keys(d, name):
 	if 'state_dict' in d:
