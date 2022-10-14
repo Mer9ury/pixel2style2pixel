@@ -27,6 +27,7 @@ class TrainOptions:
 		self.parser.add_argument('--optim_name', default='ranger', type=str, help='Which optimizer to use')
 		self.parser.add_argument('--train_decoder', default=False, type=bool, help='Whether to train the decoder model')
 		self.parser.add_argument('--start_from_latent_avg', action='store_true', help='Whether to add average latent vector to generate codes from encoder.')
+		self.parser.add_argument('--load_latent_avg', action='store_true', help='Whether to use average latent vector to generate codes from pretrained model.')
 		self.parser.add_argument('--learn_in_w', action='store_true', help='Whether to learn in w space instead of w+')
 		self.parser.add_argument('--norm', default = 'GN', type=str, help='which normalization to use at encoder model')
 

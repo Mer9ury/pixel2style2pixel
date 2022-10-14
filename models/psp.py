@@ -67,9 +67,11 @@ class pSp(nn.Module):
 			self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
 			self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
 
-			# self.latent_avg = None
+			if self.opts.load_latent_avg:
+				self.__load_latent_avg(ckpt)
+			else:
+				self.latent_avg = None
 			
-			self.__load_latent_avg(ckpt)
 		else:
 
 			print('Loading encoders weights from irse50!')
