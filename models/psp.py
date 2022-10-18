@@ -85,7 +85,6 @@ class pSp(nn.Module):
 			self.encoder.load_state_dict(encoder_ckpt, strict=False)
 			self.decoder.load_state_dict(decoder_ckpt, strict=False)
 
-			
 			self.latent_avg = None
 			print("Done!")
 

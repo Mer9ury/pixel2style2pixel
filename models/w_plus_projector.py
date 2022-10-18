@@ -21,7 +21,6 @@ from models.eg3d.camera_utils import LookAtPoseSampler
 def project(
         G,
         c,
-        outdir,
         target: torch.Tensor,  # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
         *,
         num_steps=1000,
@@ -35,11 +34,9 @@ def project(
         verbose=False,
         device: torch.device,
         initial_w=None,
-        image_log_step=100,
-        w_name: str
+        image_log_step=100
 ):
-    os.makedirs(f'{outdir}/{w_name}_w_plus', exist_ok=True)
-    outdir = f'{outdir}/{w_name}_w_plus'
+
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
     def logprint(*args):
@@ -48,46 +45,27 @@ def project(
 
     G = copy.deepcopy(G).eval().requires_grad_(False).to(device).float() # type: ignore
 
-    # Compute w stats.
-    w_avg_path = './w_avg.npy'
-    w_std_path = './w_std.npy'
-    if (not os.path.exists(w_avg_path)) or (not os.path.exists(w_std_path)):
-        print(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
-        z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
-        # c_samples = c.repeat(w_avg_samples, 1)
-
-        # use avg look at point
-
-        camera_lookat_point = torch.tensor(G.rendering_kwargs['avg_camera_pivot'], device=device)
-        cam2world_pose = LookAtPoseSampler.sample(3.14 / 2, 3.14 / 2, camera_lookat_point,
-                                                  radius=G.rendering_kwargs['avg_camera_radius'], device=device)
-        focal_length = 4.2647  # FFHQ's FOV
-        intrinsics = torch.tensor([[focal_length, 0, 0.5], [0, focal_length, 0.5], [0, 0, 1]], device=device)
-        c_samples = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-        c_samples = c_samples.repeat(w_avg_samples, 1)
-
-        w_samples = G.mapping(torch.from_numpy(z_samples).to(device), c_samples)  # [N, L, C]
-        w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)  # [N, 1, C]
-        w_avg = np.mean(w_samples, axis=0, keepdims=True)  # [1, 1, C]
-        # print('save w_avg  to ./w_avg.npy')
-        # np.save('./w_avg.npy',w_avg)
-        w_avg_tensor = torch.from_numpy(w_avg).cuda()
-        w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
-
-        # np.save(w_avg_path, w_avg)
-        # np.save(w_std_path, w_std)
-    else:
-        # w_avg = np.load(w_avg_path)
-        # w_std = np.load(w_std_path)
-        raise Exception(' ')
-
-    # z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
+    print(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
+    z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
     # c_samples = c.repeat(w_avg_samples, 1)
-    # w_samples = G.mapping(torch.from_numpy(z_samples).to(device), c_samples)  # [N, L, C]
-    # w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)  # [N, 1, C]
-    # w_avg = np.mean(w_samples, axis=0, keepdims=True)  # [1, 1, C]
-    # w_avg_tensor = torch.from_numpy(w_avg).cuda()
-    # w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
+
+    # use avg look at point
+
+    camera_lookat_point = torch.tensor(G.rendering_kwargs['avg_camera_pivot'], device=device)
+    cam2world_pose = LookAtPoseSampler.sample(3.14 / 2, 3.14 / 2, camera_lookat_point,
+                                                radius=G.rendering_kwargs['avg_camera_radius'], device=device)
+    focal_length = 4.2647  # FFHQ's FOV
+    intrinsics = torch.tensor([[focal_length, 0, 0.5], [0, focal_length, 0.5], [0, 0, 1]], device=device)
+    c_samples = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+    c_samples = c_samples.repeat(w_avg_samples, 1)
+
+    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), c_samples)  # [N, L, C]
+    w_samples = w_samples[:, :1, :].cpu().detach().numpy().astype(np.float32)  # [N, 1, C]
+    w_avg = np.mean(w_samples, axis=0, keepdims=True)  # [1, 1, C]
+    # print('save w_avg  to ./w_avg.npy')
+    # np.save('./w_avg.npy',w_avg)
+    w_avg_tensor = torch.from_numpy(w_avg).cuda()
+    w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
 
     start_w = initial_w if initial_w is not None else w_avg
 
@@ -96,12 +74,12 @@ def project(
 
     # Load VGG16 feature detector.
     #url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
-    url = './networks/vgg16.pt'
+    url = 'pretrained_models/vgg16.pt'
     with dnnlib.util.open_url(url) as f:
         vgg16 = torch.jit.load(f).eval().to(device)
-
     # Features for target image.
     target_images = target.unsqueeze(0).to(device).to(torch.float32)
+
     if target_images.shape[2] > 256:
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')
     target_features = vgg16(target_images, resize_images=False, return_lpips=True)
@@ -132,14 +110,10 @@ def project(
 
         # Synth images from opt_w.
         w_noise = torch.randn_like(w_opt) * w_noise_scale
-        ws = (w_opt + w_noise)
+
+        ws = w_opt + w_noise
+
         synth_images = G.synthesis(ws,c, noise_mode='const')['image']
-
-        if step % image_log_step == 0:
-            with torch.no_grad():
-                vis_img = (synth_images.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-
-                PIL.Image.fromarray(vis_img[0].cpu().numpy(), 'RGB').save(f'{outdir}/{step}.png')
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         synth_images = (synth_images + 1) * (255 / 2)
@@ -160,18 +134,14 @@ def project(
                 if noise.shape[2] <= 8:
                     break
                 noise = F.avg_pool2d(noise, kernel_size=2)
-        loss = dist + reg_loss * regularize_noise_weight
 
-        # if step % 10 == 0:
-        #     with torch.no_grad():
-        #         print({f'step {step}, first projection _{w_name}': loss.detach().cpu()})
+        loss = dist + reg_loss * regularize_noise_weight
 
         # Step
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
         logprint(f'step {step + 1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}')
-
         # Normalize noise.
         with torch.no_grad():
             for buf in noise_bufs.values():
