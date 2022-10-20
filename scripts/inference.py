@@ -50,9 +50,12 @@ def run():
     if 'output_size' not in opts:
         opts['output_size'] = 512
     opts = Namespace(**opts)
-
+    sampling_multiplier = 2
     net = pSp(opts)
     net.decoder.rendering_kwargs = eg3d_config.rendering_kwargs
+    net.decoder.rendering_kwargs['depth_resolution'] = int(net.decoder.rendering_kwargs['depth_resolution'] * sampling_multiplier)
+    net.decoder.rendering_kwargs['depth_resolution_importance'] = int(
+        net.decoder.rendering_kwargs['depth_resolution_importance'] * sampling_multiplier)
     net.eval()
     net.cuda()
 
