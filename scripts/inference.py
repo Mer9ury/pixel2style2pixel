@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import sys
 
 sys.path.append(".")
@@ -14,9 +15,13 @@ sys.path.append("..")
 
 from configs import data_configs
 from datasets.inference_dataset import InferenceDataset
+from datasets.eg3d_dataset import EG3DDataset
+from configs import eg3d_config
+from criteria import id_loss
 from utils.common import tensor2im, log_input_image
 from options.test_options import TestOptions
 from models.psp import pSp
+from models.eg3d.camera_utils import LookAtPoseSampler, FOV_to_intrinsics
 
 
 def run():
@@ -43,49 +48,61 @@ def run():
     if 'learn_in_w' not in opts:
         opts['learn_in_w'] = False
     if 'output_size' not in opts:
-        opts['output_size'] = 1024
+        opts['output_size'] = 512
     opts = Namespace(**opts)
-
+    sampling_multiplier = 2
     net = pSp(opts)
+    net.decoder.rendering_kwargs = eg3d_config.rendering_kwargs
+    net.decoder.rendering_kwargs['depth_resolution'] = int(net.decoder.rendering_kwargs['depth_resolution'] * sampling_multiplier)
+    net.decoder.rendering_kwargs['depth_resolution_importance'] = int(
+        net.decoder.rendering_kwargs['depth_resolution_importance'] * sampling_multiplier)
     net.eval()
     net.cuda()
 
     print('Loading dataset for {}'.format(opts.dataset_type))
     dataset_args = data_configs.DATASETS[opts.dataset_type]
     transforms_dict = dataset_args['transforms'](opts).get_transforms()
-    dataset = InferenceDataset(root=opts.data_path,
-                               transform=transforms_dict['transform_inference'],
+    dataset = InferenceDataset(dataset_path=opts.data_path,
+                               from_transform=transforms_dict['transform_test'],
+                               to_transform=transforms_dict['transform_inference'],
                                opts=opts)
     dataloader = DataLoader(dataset,
                             batch_size=opts.test_batch_size,
                             shuffle=False,
                             num_workers=int(opts.test_workers),
                             drop_last=True)
+                            
+    sim_loss = id_loss.IDLoss(opts.device,use_curricular=True).eval()
 
     if opts.n_images is None:
         opts.n_images = len(dataset)
 
     global_i = 0
     global_time = []
-    for input_batch in tqdm(dataloader):
+    similarity = 0
+    mse = 0
+    for from_im, to_im in tqdm(dataloader):
         if global_i >= opts.n_images:
             break
         with torch.no_grad():
-            input_cuda = input_batch.cuda().float()
+            from_im = from_im.cuda().float()
+            to_im = to_im.cuda()
             tic = time.time()
-            result_batch = run_on_batch(input_cuda, net, opts)
+            result_imgs, recon_im = run_on_batch_samples(from_im, net, opts)
             toc = time.time()
             global_time.append(toc - tic)
 
+        
         for i in range(opts.test_batch_size):
-            result = tensor2im(result_batch[i])
+            result = tensor2im(result_imgs[i])
             im_path = dataset.paths[global_i]
 
             if opts.couple_outputs or global_i % 100 == 0:
-                input_im = log_input_image(input_batch[i], opts)
+                input_im = log_input_image(to_im[i], opts)
                 resize_amount = (256, 256) if opts.resize_outputs else (opts.output_size, opts.output_size)
                 if opts.resize_factors is not None:
                     # for super resolution, save the original, down-sampled, and output
+                    
                     source = Image.open(im_path)
                     res = np.concatenate([np.array(source.resize(resize_amount)),
                                           np.array(input_im.resize(resize_amount, resample=Image.NEAREST)),
@@ -93,14 +110,22 @@ def run():
                 else:
                     # otherwise, save the original and output
                     res = np.concatenate([np.array(input_im.resize(resize_amount)),
-                                          np.array(result.resize(resize_amount))], axis=1)
+                                          np.array(result)], axis=1)
+
+                similarity += sim_loss(recon_im,to_im,from_im,True)[2][0]['diff_target']
+                print(similarity /(global_i+1))
+                mse += F.mse_loss(to_im,recon_im) 
                 Image.fromarray(res).save(os.path.join(out_path_coupled, os.path.basename(im_path)))
 
             im_save_path = os.path.join(out_path_results, os.path.basename(im_path))
+            
             Image.fromarray(np.array(result)).save(im_save_path)
 
             global_i += 1
-
+        if global_i > 1000:
+            break
+    print(f'mean sim is {similarity / 1000}')
+    print(f'mean mse is {mse / 1000}')
     stats_path = os.path.join(opts.exp_dir, 'stats.txt')
     result_str = 'Runtime {:.4f}+-{:.4f}'.format(np.mean(global_time), np.std(global_time))
     print(result_str)
@@ -111,7 +136,7 @@ def run():
 
 def run_on_batch(inputs, net, opts):
     if opts.latent_mask is None:
-        result_batch = net(inputs, randomize_noise=False, resize=opts.resize_outputs)
+        result_batch = net.encoder(inputs, randomize_noise=False, resize=opts.resize_outputs)
     else:
         latent_mask = [int(l) for l in opts.latent_mask.split(",")]
         result_batch = []
@@ -130,6 +155,29 @@ def run_on_batch(inputs, net, opts):
             result_batch.append(res)
         result_batch = torch.cat(result_batch, dim=0)
     return result_batch
+
+def run_on_batch_samples(inputs, net, opts):
+    codes, cams = net.encoder(inputs)
+    ws = codes + net.latent_avg.repeat(codes.shape[0], 1)
+    G = net.decoder
+    angle_p = -0.2
+    intrinsics = FOV_to_intrinsics(18.837, device=opts.device)
+    recon_img = G.synthesis(ws, cams)['image']
+
+    imgs = [recon_img]
+    for angle_y, angle_p in [(.3, angle_p), (0, angle_p), (-.3, angle_p)]:
+        cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=opts.device)
+        cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+        cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=opts.device)
+        conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=opts.device)
+        camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+        conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+
+        img = G.synthesis(ws, camera_params)['image']
+        imgs.append(img)
+    img = torch.cat(imgs, dim=3)
+
+    return img, recon_img
 
 
 if __name__ == '__main__':

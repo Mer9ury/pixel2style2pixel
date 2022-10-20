@@ -14,29 +14,28 @@ sys.path.append("..")
 from options.train_options import TrainOptions
 from training.eg3d_coach import Coach
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '25454'
-
-    # initialize the process group
-    torch.distributed.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
-def cleanup():
-    torch.distributed.destroy_process_group()
+def setup_progressive_steps(opts):
+	num_style_layers = 14
+	num_deltas = num_style_layers - 1
+	if opts.progressive_start is not None:  # If progressive delta training
+		opts.progressive_steps = [0]
+		next_progressive_step = opts.progressive_start
+		for i in range(num_deltas):
+			opts.progressive_steps.append(next_progressive_step)
+			next_progressive_step += opts.progressive_step_every
 
 def main():
 
-
-	dist.init_process_group(backend = "nccl", init_method='env://')
-	rank = dist.get_rank()
-	size = dist.get_world_size()
 	local_rank = int(os.environ['LOCAL_RANK'])
+	torch.cuda.empty_cache()
 
 	# torch.autograd.set_detect_anomaly(True)
 	opts = TrainOptions().parse()
 	# if os.path.exists(opts.exp_dir):
 	# 	raise Exception('Oops... {} already exists'.format(opts.exp_dir))
+	setup_progressive_steps(opts)
 	os.makedirs(opts.exp_dir,exist_ok=True)
 
 	opts_dict = vars(opts)
@@ -44,9 +43,20 @@ def main():
 	with open(os.path.join(opts.exp_dir, 'opt.json'), 'w') as f:
 		json.dump(opts_dict, f, indent=4, sort_keys=True)
 
+	torch.cuda.set_device(local_rank)
+	print(local_rank)
+
+	# os.environ['MASTER_ADDR'] = 'localhost'
+	# os.environ['MASTER_PORT'] = '25455'
+	dist.init_process_group(backend = "nccl", init_method='env://')
+
+	rank = dist.get_rank()
+	size = dist.get_world_size()
+
 	opts.num_gpus = size
 	opts.rank = local_rank
 
+	dist.barrier()
 	coach = Coach(opts)
 	coach.train()
 
@@ -54,25 +64,7 @@ def main():
 	# 	mp.spawn(main_worker, nprocs = opts.num_gpus, args = (opts.num_gpus, opts), join = True)
 	# else:
 	# 	main_worker(0, opts.num_gpus, opts)
-	
-	cleanup()
 
-	
-	
-
-def main_worker(gpu, world_size, opts):
-	print(gpu, world_size)
-	opts.rank = gpu
-
-	if opts.rank is not None:
-		print("Use GPU: {} for training".format(opts.rank))
-	
-	setup(opts.rank, world_size)
-
-	coach = Coach(opts)
-	coach.train()
-
-	cleanup()
 
 if __name__ == '__main__':
 	main()

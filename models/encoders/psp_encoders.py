@@ -1,12 +1,32 @@
+from enum import Enum
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn import Linear, Conv2d, BatchNorm2d, PReLU, Sequential, Module
+from torch.nn import Linear, Conv2d, BatchNorm2d, PReLU, Sequential, Module, GroupNorm
 
 from models.encoders.helpers import get_blocks, Flatten, bottleneck_IR, bottleneck_IR_SE
 from models.stylegan2.model import EqualLinear
-from .utils import angle_trans_to_cams
+from .utils import angle_trans_to_cams, get_norm
+
+class ProgressiveStage(Enum):
+    WTraining = 0
+    Delta1Training = 1
+    Delta2Training = 2
+    Delta3Training = 3
+    Delta4Training = 4
+    Delta5Training = 5
+    Delta6Training = 6
+    Delta7Training = 7
+    Delta8Training = 8
+    Delta9Training = 9
+    Delta10Training = 10
+    Delta11Training = 11
+    Delta12Training = 12
+    Delta13Training = 13
+    Inference = 14
+
+
 
 
 class GradualStyleBlock(Module):
@@ -44,14 +64,15 @@ class GradualStyleEncoder(Module):
         elif mode == 'ir_se':
             unit_module = bottleneck_IR_SE
         self.input_layer = Sequential(Conv2d(opts.input_nc, 64, (3, 3), 1, 1, bias=False),
-                                      BatchNorm2d(64),
+                                      get_norm(norm = opts.norm, C = 64),
                                       PReLU(64))
         modules = []
         for block in blocks:
             for bottleneck in block:
                 modules.append(unit_module(bottleneck.in_channel,
                                            bottleneck.depth,
-                                           bottleneck.stride))
+                                           bottleneck.stride,
+                                           opts.norm))
         self.body = Sequential(*modules)
 
         self.styles = nn.ModuleList()
@@ -198,3 +219,115 @@ class BackboneEncoderUsingLastLayerIntoWPlus(Module):
         x = self.linear(x)
         x = x.view(-1, self.n_styles, 512)
         return x
+
+
+class Encoder4Editing(Module):
+    def __init__(self, num_layers, mode='ir', opts=None):
+        super(Encoder4Editing, self).__init__()
+        assert num_layers in [50, 100, 152], 'num_layers should be 50,100, or 152'
+        assert mode in ['ir', 'ir_se'], 'mode should be ir or ir_se'
+        blocks = get_blocks(num_layers)
+        if mode == 'ir':
+            unit_module = bottleneck_IR
+        elif mode == 'ir_se':
+            unit_module = bottleneck_IR_SE
+        self.input_layer = Sequential(Conv2d(3, 64, (3, 3), 1, 1, bias=False),
+                                      get_norm(norm = opts.norm, C = 64),
+                                      PReLU(64))
+        modules = []
+        for block in blocks:
+            for bottleneck in block:
+                modules.append(unit_module(bottleneck.in_channel,
+                                           bottleneck.depth,
+                                           bottleneck.stride,
+                                           opts.norm))
+        self.body = Sequential(*modules)
+
+        self.styles = nn.ModuleList()
+        self.style_count = opts.n_styles
+        self.coarse_ind = 3
+        self.middle_ind = 7
+
+        for i in range(self.style_count):
+            if i < self.coarse_ind:
+                style = GradualStyleBlock(512, 512, 16)
+            elif i < self.middle_ind:
+                style = GradualStyleBlock(512, 512, 32)
+            else:
+                style = GradualStyleBlock(512, 512, 64)
+            self.styles.append(style)
+
+        self.latlayer1 = nn.Conv2d(256, 512, kernel_size=1, stride=1, padding=0)
+        self.latlayer2 = nn.Conv2d(128, 512, kernel_size=1, stride=1, padding=0)
+
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.angle_extractor = nn.Linear(512, 6)
+        self.trans_extractor = nn.Linear(512, 3)
+
+        self.progressive_stage = ProgressiveStage.Inference
+        self.opts = opts
+
+    def get_deltas_starting_dimensions(self):
+        ''' Get a list of the initial dimension of every delta from which it is applied '''
+        return list(range(self.style_count))  # Each dimension has a delta applied to it
+
+    def set_progressive_stage(self, new_stage: ProgressiveStage):
+        self.progressive_stage = new_stage
+        print('Changed progressive stage to: ', new_stage)
+
+    def _upsample_add(self, x, y):
+        '''Upsample and add two feature maps.
+        Args:
+          x: (Variable) top feature map to be upsampled.
+          y: (Variable) lateral feature map.
+        Returns:
+          (Variable) added feature map.
+        Note in PyTorch, when input size is odd, the upsampled feature map
+        with `F.upsample(..., scale_factor=2, mode='nearest')`
+        maybe not equal to the lateral feature map size.
+        e.g.
+        original input size: [N,_,15,15] ->
+        conv2d feature map size: [N,_,8,8] ->
+        upsampled feature map size: [N,_,16,16]
+        So we choose bilinear upsample which supports arbitrary output sizes.
+        '''
+        _, _, H, W = y.size()
+        return F.interpolate(x, size=(H, W), mode='bilinear', align_corners=True) + y
+
+
+    def forward(self, x):
+        x = self.input_layer(x)
+
+        modulelist = list(self.body._modules.values())
+        for i, l in enumerate(modulelist):
+            x = l(x)
+            if i == 6:
+                c1 = x
+            elif i == 20:
+                c2 = x
+            elif i == 23:
+                c3 = x
+
+        # Infer main W and duplicate it
+
+        x = self.avg_pool(x)
+        x = x.view(-1, 512)
+        angle = self.angle_extractor(x)
+        trans = self.trans_extractor(x)
+        
+        cams = angle_trans_to_cams(angle,trans,self.opts.rank)
+
+        w0 = self.styles[0](c3)
+        w = w0.repeat(self.style_count, 1, 1).permute(1, 0, 2)
+        stage = self.progressive_stage.value
+        features = c3
+        for i in range(1, min(stage + 1, self.style_count)):  # Infer additional deltas
+            if i == self.coarse_ind:
+                p2 = self._upsample_add(c3, self.latlayer1(c2))  # FPN's middle features
+                features = p2
+            elif i == self.middle_ind:
+                p1 = self._upsample_add(p2, self.latlayer2(c1))  # FPN's fine features
+                features = p1
+            delta_i = self.styles[i](features)
+            w[:, i] += delta_i
+        return w, cams

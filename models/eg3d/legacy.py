@@ -18,26 +18,30 @@ import numpy as np
 import torch
 import dnnlib
 from torch_utils import misc
-
+import time
 #----------------------------------------------------------------------------
 
-def load_network_pkl(f, force_fp16=False):
+def load_network_pkl(f, force_fp16=False, rank = 0):
+
     data = _LegacyUnpickler(f).load()
 
     # Legacy TensorFlow pickle => convert.
     if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
         tf_G, tf_D, tf_Gs = data
-        G = convert_tf_generator(tf_G)
+        G = convert_tf_generator(tf_G,rank)
         D = convert_tf_discriminator(tf_D)
-        G_ema = convert_tf_generator(tf_Gs)
+        G_ema = convert_tf_generator(tf_Gs,rank)
+        
         data = dict(G=G, D=D, G_ema=G_ema)
 
+
     # Add missing fields.
+    
     if 'training_set_kwargs' not in data:
         data['training_set_kwargs'] = None
     if 'augment_pipe' not in data:
         data['augment_pipe'] = None
-
+    
     # Validate contents.
     assert isinstance(data['G'], torch.nn.Module)
     assert isinstance(data['D'], torch.nn.Module)
@@ -46,17 +50,18 @@ def load_network_pkl(f, force_fp16=False):
     assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None)))
 
     # Force FP16.
-    if force_fp16:
-        for key in ['G', 'D', 'G_ema']:
-            old = data[key]
-            kwargs = copy.deepcopy(old.init_kwargs)
-            fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
-            fp16_kwargs.num_fp16_res = 4
-            fp16_kwargs.conv_clamp = 256
-            if kwargs != old.init_kwargs:
-                new = type(old)(**kwargs).eval().requires_grad_(False)
-                misc.copy_params_and_buffers(old, new, require_all=True)
-                data[key] = new
+    
+    # if force_fp16:
+    #     for key in ['G', 'D', 'G_ema']:
+    #         old = data[key]
+    #         kwargs = copy.deepcopy(old.init_kwargs)
+    #         fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
+    #         fp16_kwargs.num_fp16_res = 4
+    #         fp16_kwargs.conv_clamp = 256
+    #         if kwargs != old.init_kwargs:
+    #             new = type(old)(**kwargs).eval().requires_grad_(False)
+    #             misc.copy_params_and_buffers(old, new, require_all=True)
+    #             data[key] = new
     return data
 
 #----------------------------------------------------------------------------
@@ -67,7 +72,7 @@ class _TFNetworkStub(dnnlib.EasyDict):
 class _LegacyUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module == 'dnnlib.tflib.network' and name == 'Network':
-            return _TFNetworkStub
+            return _TFNetworkStub()
         return super().find_class(module, name)
 
 #----------------------------------------------------------------------------
@@ -106,7 +111,7 @@ def _populate_module_params(module, *patterns):
 
 #----------------------------------------------------------------------------
 
-def convert_tf_generator(tf_G):
+def convert_tf_generator(tf_G, rank = 0):
     if tf_G.version < 4:
         raise ValueError('TensorFlow pickle version too low')
 
@@ -167,7 +172,7 @@ def convert_tf_generator(tf_G):
     #for name, value in tf_params.items(): print(f'{name:<50s}{list(value.shape)}')
 
     # Convert params.
-    G = network_class(**kwargs).eval().requires_grad_(False)
+    G = network_class(**kwargs).eval().requires_grad_(False).cuda(rank)
     # pylint: disable=unnecessary-lambda
     # pylint: disable=f-string-without-interpolation
     _populate_module_params(G,

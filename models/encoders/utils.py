@@ -16,7 +16,15 @@ import json
 import argparse
 import scipy.io
 import sys
+from torch.nn import BatchNorm2d, GroupNorm
 
+
+def get_norm(norm, C):
+	if norm == 'BN':
+		return BatchNorm2d(C)
+	if norm == 'GN':
+		return GroupNorm(C//2, C)
+        
 def compute_rotation(angles, rank):
         """
         Return:
@@ -57,8 +65,8 @@ def compute_rotation(angles, rank):
 
 def fix_intrinsics(intrinsics):
     assert intrinsics.shape[1:] == (3, 3), intrinsics
-    intrinsics[:,0,0] = 1492.645/700
-    intrinsics[:,1,1] = 1492.645/700
+    intrinsics[:,0,0] = 2985.29/700
+    intrinsics[:,1,1] = 2985.29/700
     intrinsics[:,0,2] = 1/2
     intrinsics[:,1,2] = 1/2
     assert intrinsics[:,0,1].all() == 0
@@ -103,8 +111,8 @@ def angle_trans_to_cams(angle, trans, rank):
     pose[:, :3, :3] = R
 
     # c *= 0.27 # normalize camera radius
-    # c[:,1] += 0.006 # additional offset used in submission
-    # c[:,2] += 0.161 # additional offset used in submission
+    # c[1] += 0.006 # additional offset used in submission
+    # c[2] += 0.161 # additional offset used in submission
 
     pose[:,:3,3] = c
 

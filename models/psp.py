@@ -35,7 +35,12 @@ class pSp(nn.Module):
 		self.opts.n_styles = 14
 		# Define architecture
 
+		self.device = torch.device(self.opts.rank)
+
 		self.encoder = self.set_encoder()
+
+		self.decoder = TriPlaneGenerator(*(), **init_kwargs).eval()
+		self.decoder.neural_rendering_resolution = self.opts.render_resolution
 		
 		self.face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
 		# Load weights if needed
@@ -45,6 +50,8 @@ class pSp(nn.Module):
 	def set_encoder(self):
 		if self.opts.encoder_type == 'GradualStyleEncoder':
 			encoder = psp_encoders.GradualStyleEncoder(50, 'ir_se', self.opts)
+		elif self.opts.encoder_type == 'Encoder4Editing':
+			encoder = psp_encoders.Encoder4Editing(50, 'ir_se', self.opts)
 		elif self.opts.encoder_type == 'BackboneEncoderUsingLastLayerIntoW':
 			encoder = psp_encoders.BackboneEncoderUsingLastLayerIntoW(50, 'ir_se', self.opts)
 		elif self.opts.encoder_type == 'BackboneEncoderUsingLastLayerIntoWPlus':
@@ -56,26 +63,31 @@ class pSp(nn.Module):
 	def load_weights(self):
 		if self.opts.checkpoint_path is not None:
 			print('Loading pSp from checkpoint: {}'.format(self.opts.checkpoint_path))
-			ckpt = torch.load(self.opts.checkpoint_path, map_location=torch.device(self.opts.rank))
+
+			ckpt = torch.load(self.opts.checkpoint_path, map_location='cpu')
+
 			self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
 			self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
-			self.__load_latent_avg(ckpt)
+
+			if self.opts.load_latent_avg:
+				self.__load_latent_avg(ckpt)
+			else:
+				self.latent_avg = None
+			
 		else:
 
 			print('Loading encoders weights from irse50!')
-			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location=torch.device(self.opts.rank))
-			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location=torch.device(self.opts.rank))
+
+			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location='cpu')
+			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location='cpu')['G_ema']
 
 			# if input to encoder is not an RGB image, do not load the input layer weights
 			if self.opts.label_nc != 0:
 				encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if "input_layer" not in k}
 			
 			self.encoder.load_state_dict(encoder_ckpt, strict=False)
-			
-			self.decoder = TriPlaneGenerator(*(), **init_kwargs).cuda(self.opts.rank).eval()
-			self.decoder.load_state_dict(decoder_ckpt['G_ema'], strict=False)
-			self.decoder.neural_rendering_resolution = 512
-			self.decoder.rendering_kwargs = rendering_kwargs
+			self.decoder.load_state_dict(decoder_ckpt, strict=False)
+
 
 			self.latent_avg = None
 			print("Done!")
@@ -106,13 +118,11 @@ class pSp(nn.Module):
 
 
 		input_is_latent = not input_code
+		if y_cams:
+			images = self.decoder.synthesis(codes, y_cams)['image']
+		else:
+			images = self.decoder.synthesis(codes, camera_params)['image']
 
-		with torch.cuda.amp.autocast(enabled=True):
-			if y_cams:
-				images = self.decoder.synthesis(codes, y_cams)['image']
-			else:
-				images = self.decoder.synthesis(codes, camera_params)['image']
-			
 		if resize:
 			images = self.face_pool(images)
 
