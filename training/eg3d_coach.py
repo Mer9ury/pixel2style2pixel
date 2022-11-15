@@ -76,7 +76,7 @@ class Coach:
 		if self.opts.lpips_lambda > 0:
 			self.lpips_loss = LPIPS(net_type='alex',rank = self.opts.rank).cuda(self.opts.rank).eval()
 		if self.opts.id_lambda > 0:
-			self.id_loss = id_loss.IDLoss(self.opts.rank).eval()
+			self.id_loss = id_loss.IDLoss().eval()
 		if self.opts.w_norm_lambda > 0:
 			self.w_norm_loss = w_norm.WNormLoss(start_from_latent_avg=self.opts.start_from_latent_avg)
 		if self.opts.moco_lambda > 0:
@@ -154,7 +154,6 @@ class Coach:
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 				# with torch.cuda.amp.autocast():
-
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 				loss_dict = {**loss_dict, **enc_loss_dict}
@@ -268,11 +267,11 @@ class Coach:
 		train_dataset = EG3DDataset(  dataset_path = self.opts.dataset_path,
 									  transform=transforms_dict['transform_gt_train'],
 									  opts=self.opts,
-									  metadata = 'dataset.json')
+									  metadata = 'ffhq_dataset.json')
 		test_dataset = EG3DDataset(  dataset_path = self.opts.dataset_path,
 									  transform=transforms_dict['transform_gt_train'],
 									  opts=self.opts,
-									  metadata = 'dataset.json',
+									  metadata = 'ffhq_dataset.json',
 									  is_train = False)
 		if self.opts.use_wandb:
 			self.wb_logger.log_dataset_wandb(train_dataset, dataset_name="Train")

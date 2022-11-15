@@ -23,7 +23,7 @@ class TrainOptions:
 		self.parser.add_argument('--workers', default=8, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')
 
-		self.parser.add_argument('--learning_rate', default=0.0001, type=float, help='Optimizer learning rate')
+		self.parser.add_argument('--learning_rate', default=0.000075, type=float, help='Optimizer learning rate')
 		self.parser.add_argument('--optim_name', default='ranger', type=str, help='Which optimizer to use')
 		self.parser.add_argument('--train_decoder', default=False, type=bool, help='Whether to train the decoder model')
 		self.parser.add_argument('--start_from_latent_avg', action='store_true', help='Whether to add average latent vector to generate codes from encoder.')
@@ -48,7 +48,7 @@ class TrainOptions:
 
 		# Discriminator flags
 		self.parser.add_argument('--w_discriminator_lambda', default=0, type=float, help='Dw loss multiplier')
-		self.parser.add_argument('--w_discriminator_lr', default=2e-5, type=float, help='Dw learning rate')
+		self.parser.add_argument('--w_discriminator_lr', default=1.5e-5, type=float, help='Dw learning rate')
 		self.parser.add_argument("--r1", type=float, default=10, help="weight of the r1 regularization")
 		self.parser.add_argument("--d_reg_every", type=int, default=16,
 									help="interval for applying r1 regularization")

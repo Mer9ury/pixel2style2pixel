@@ -22,6 +22,7 @@ class EncodeTransforms(TransformsConfig):
 		transforms_dict = {
 			'transform_gt_train': transforms.Compose([
 				transforms.ToTensor(),
+				transforms.Resize((256, 256)),
 				transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
 			'transform_source': None,
 			'transform_test': transforms.Compose([
@@ -30,6 +31,9 @@ class EncodeTransforms(TransformsConfig):
 				transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
 			'transform_inference': transforms.Compose([
 				transforms.Resize((512, 512)),
+				transforms.ToTensor(),
+				transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
+			'transform_id_loss': transforms.Compose([
 				transforms.ToTensor(),
 				transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
 		}

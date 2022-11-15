@@ -9,6 +9,7 @@ from PIL import Image
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import sys
+import json
 
 sys.path.append(".")
 sys.path.append("..")
@@ -17,7 +18,7 @@ from configs import data_configs
 from datasets.inference_dataset import InferenceDataset
 from datasets.eg3d_dataset import EG3DDataset
 from configs import eg3d_config
-from criteria import id_loss
+from criteria import curricular_loss
 from utils.common import tensor2im, log_input_image
 from options.test_options import TestOptions
 from models.psp import pSp
@@ -72,7 +73,7 @@ def run():
                             num_workers=int(opts.test_workers),
                             drop_last=True)
                             
-    sim_loss = id_loss.IDLoss(opts.device,use_curricular=True).eval()
+    sim_loss = curricular_loss.IDLoss(opts.device,use_curricular=True).eval()
 
     if opts.n_images is None:
         opts.n_images = len(dataset)
@@ -81,6 +82,8 @@ def run():
     global_time = []
     similarity = 0
     mse = 0
+    score_dict = {}
+    w_vectors = []
     for from_im, to_im in tqdm(dataloader):
         if global_i >= opts.n_images:
             break
@@ -88,7 +91,8 @@ def run():
             from_im = from_im.cuda().float()
             to_im = to_im.cuda()
             tic = time.time()
-            result_imgs, recon_im = run_on_batch_samples(from_im, net, opts)
+            result_imgs, recon_im, result_ws = run_on_batch_samples(from_im, net, opts)
+            w_vectors.append(result_ws)
             toc = time.time()
             global_time.append(toc - tic)
 
@@ -112,9 +116,13 @@ def run():
                     res = np.concatenate([np.array(input_im.resize(resize_amount)),
                                           np.array(result)], axis=1)
 
-                similarity += sim_loss(recon_im,to_im,from_im,True)[2][0]['diff_target']
-                print(similarity /(global_i+1))
-                mse += F.mse_loss(to_im,recon_im) 
+                temp_sim = sim_loss(recon_im,to_im,True)
+                similarity += temp_sim
+
+                temp_mse = F.mse_loss(to_im,recon_im) 
+                mse += temp_mse
+
+                score_dict[im_path] = {'sim':temp_sim, 'mse':temp_mse.item()}
                 Image.fromarray(res).save(os.path.join(out_path_coupled, os.path.basename(im_path)))
 
             im_save_path = os.path.join(out_path_results, os.path.basename(im_path))
@@ -124,11 +132,18 @@ def run():
             global_i += 1
         if global_i > 1000:
             break
+    w_vectors = np.concatenate(w_vectors)
+    np.save(os.path.join(opts.exp_dir, 'w_result.npy'),w_vectors)
+
     print(f'mean sim is {similarity / 1000}')
     print(f'mean mse is {mse / 1000}')
+
     stats_path = os.path.join(opts.exp_dir, 'stats.txt')
     result_str = 'Runtime {:.4f}+-{:.4f}'.format(np.mean(global_time), np.std(global_time))
     print(result_str)
+
+    with open(os.path.join(opts.exp_dir,'scores.json'), 'w') as f : 
+	    json.dump(score_dict, f, indent=4)
 
     with open(stats_path, 'w') as f:
         f.write(result_str)
@@ -160,7 +175,7 @@ def run_on_batch_samples(inputs, net, opts):
     codes, cams = net.encoder(inputs)
     ws = codes + net.latent_avg.repeat(codes.shape[0], 1)
     G = net.decoder
-    angle_p = -0.2
+    angle_p = 0
     intrinsics = FOV_to_intrinsics(18.837, device=opts.device)
     recon_img = G.synthesis(ws, cams)['image']
 
@@ -177,7 +192,7 @@ def run_on_batch_samples(inputs, net, opts):
         imgs.append(img)
     img = torch.cat(imgs, dim=3)
 
-    return img, recon_img
+    return img, recon_img, ws.detach().cpu().numpy()
 
 
 if __name__ == '__main__':

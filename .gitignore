@@ -2,6 +2,6 @@
 *.pt
 *.pth
 *.pyc
-dataset.json
+*.json
 pretrained_models
 experiments
