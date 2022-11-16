@@ -1,10 +1,9 @@
-OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 scripts/train.py \
+OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=1 torchrun --nproc_per_node=1 scripts/train.py \
 --dataset_type=ffhq_encode \
---exp_dir=experiments/1109_psp_realign \
---checkpoint_path=experiments/1109_psp_realign/checkpoints/best_model.pt \
+--exp_dir=experiments/psp_no_cam_test \
 --workers=8 \
---batch_size=6 \
---test_batch_size=4 \
+--batch_size=1 \
+--test_batch_size=1 \
 --test_workers=4 \
 --val_interval=5000 \
 --save_interval=10000 \
@@ -17,5 +16,6 @@ OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 scripts/tra
 --cams_lambda=0.1 \
 --dataset_path=/workspace/ffhq_512_realign_mirrored \
 --distributed=True  \
+--ensure_cam=True \
 --load_latent_avg
 
