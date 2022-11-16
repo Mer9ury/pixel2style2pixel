@@ -154,6 +154,12 @@ class Coach:
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 				# with torch.cuda.amp.autocast():
+
+				if self.opts.ensure_cam:
+					y_hat, cams, latent = self.net.forward(x, y_cams=y_cams, return_latents=True)
+				else:
+					y_hat, cams, latent = self.net.forward(x, return_latents=True)
+
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 				loss_dict = {**loss_dict, **enc_loss_dict}
@@ -209,7 +215,10 @@ class Coach:
 
 			with torch.no_grad():
 				x, y, y_cams = x.to(self.device).float(),y.to(self.device).float(), y_cams.to(self.device).float()
-				y_hat, cams, latent = self.net.forward(x, return_latents=True)
+				if self.opts.ensure_cam:
+					y_hat, cams, latent = self.net.forward(x, y_cams=y_cams, return_latents=True)
+				else:
+					y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 				cur_loss_dict = {**cur_loss_dict,**enc_loss_dict}
 			agg_loss_dict.append(cur_loss_dict)

@@ -91,8 +91,9 @@ class GradualStyleEncoder(Module):
         self.latlayer2 = nn.Conv2d(128, 512, kernel_size=1, stride=1, padding=0)
 
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.angle_extractor = nn.Linear(512, 6)
-        self.trans_extractor = nn.Linear(512, 3)
+        if not opts.ensure_cam:
+            self.angle_extractor = nn.Linear(512, 6)
+            self.trans_extractor = nn.Linear(512, 3)
 
         self.opts = opts
 
@@ -131,10 +132,6 @@ class GradualStyleEncoder(Module):
 
         x = self.avg_pool(x)
         x = x.view(-1, 512)
-        angle = self.angle_extractor(x)
-        trans = self.trans_extractor(x)
-        
-        cams = angle_trans_to_cams(angle,trans,self.opts.rank)
 
         for j in range(self.coarse_ind):
             latents.append(self.styles[j](c3))
@@ -148,6 +145,17 @@ class GradualStyleEncoder(Module):
             latents.append(self.styles[j](p1))
 
         out = torch.stack(latents, dim=1)
+
+        if self.opts.ensure_cam:
+            # Use ground_truth_cam from dataloader
+            cams = None
+
+        else:
+            angle = self.angle_extractor(x)
+            trans = self.trans_extractor(x)
+        
+            cams = angle_trans_to_cams(angle,trans,self.opts.rank)
+
         return out, cams
 
 

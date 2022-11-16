@@ -118,7 +118,7 @@ class pSp(nn.Module):
 
 
 		input_is_latent = not input_code
-		if y_cams:
+		if y_cams is not None:
 			images = self.decoder.synthesis(codes, y_cams)['image']
 		else:
 			images = self.decoder.synthesis(codes, camera_params)['image']
