@@ -66,6 +66,9 @@ class TrainOptions:
 		self.parser.add_argument('--delta_norm', type=int, default=2, help="norm type of the deltas")
 		self.parser.add_argument('--delta_norm_lambda', type=float, default=2e-4, help="lambda for delta norm loss")
 
+		# pSp specific
+		self.parser.add_argument('--ensure_cam', type=bool, default=False, help="whether to use pSp's cam")
+
         # Progressive training
 		self.parser.add_argument('--progressive_steps', nargs='+', type=int, default=None,
                                  help="The training steps of training new deltas. steps[i] starts the delta_i training")
