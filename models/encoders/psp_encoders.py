@@ -146,8 +146,9 @@ class GradualStyleEncoder(Module):
         p1 = self._upsample_add(p2, self.latlayer2(c1))
         for j in range(self.middle_ind, self.style_count):
             latents.append(self.styles[j](p1))
-
+        
         out = torch.stack(latents, dim=1)
+        print(out.shape)
         return out, cams
 
 

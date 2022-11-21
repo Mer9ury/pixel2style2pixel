@@ -36,7 +36,7 @@ class IDLoss(nn.Module):
 
     def extract_feats(self, x, use_mtcnn):
         if use_mtcnn:
-            # x = tensor2im(x[0])
+            x = tensor2im(x[0])
             x, _ = self.mtcnn.align(x)
             x = self.transform(x)
             x = x.unsqueeze(0).cuda()

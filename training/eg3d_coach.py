@@ -16,6 +16,7 @@ from criteria import id_loss, w_norm, moco_loss, geodesic_loss
 from configs import data_configs
 from datasets.images_dataset import ImagesDataset
 from datasets.eg3d_dataset import EG3DDataset
+from datasets.synthetic_dataset import SyntheticDataset
 from models.latent_codes_pool import LatentCodesPool
 from models.encoders.psp_encoders import ProgressiveStage
 from models.discriminator import LatentCodesDiscriminator
@@ -28,13 +29,14 @@ import copy
 from tqdm import tqdm
 from datetime import datetime
 import time
+from itertools import cycle
 
 
 
 class Coach:
 	def __init__(self, opts):
 		self.opts = opts
-
+ 
 		self.global_step = 0
 
 		self.device = torch.device(opts.rank)# TODO: Allow multiple GPU? currently using CUDA_VISIBLE_DEVICES
@@ -95,7 +97,7 @@ class Coach:
 		self.optimizer = self.configure_optimizers()
 
 		# Initialize dataset
-		self.train_dataset, self.test_dataset = self.configure_datasets()
+		self.train_dataset, self.test_dataset, self.synthetic_dataset = self.configure_datasets(use_synthetic = True)
 
 		
 		
@@ -121,7 +123,14 @@ class Coach:
 										  sampler = self.test_sampler,
 										  pin_memory=True,
 										  drop_last=True)
-		
+		self.synthetic_dataloader = DataLoader(self.synthetic_dataset,
+											batch_size=self.opts.batch_size,
+											shuffle= self.train_sampler is None,
+											num_workers=int(self.opts.workers),
+											sampler = self.train_sampler,
+											pin_memory=True,
+											drop_last=True)
+			
 		# Initialize logger
 		log_dir = os.path.join(opts.exp_dir, 'logs')
 		os.makedirs(log_dir, exist_ok=True)
@@ -145,22 +154,39 @@ class Coach:
 		while self.global_step < self.opts.max_steps:
 			self.train_dataloader.sampler.set_epoch(epoch)
 			
-			for batch_idx, batch in enumerate(tqdm(self.train_dataloader)):
-				x, y_cams = batch
+			for batch_idx, batches in enumerate(zip(tqdm(self.train_dataloader),self.synthetic_dataloader)):
+				x, y_cams = batches[0]
+				can_x, rand_x, can_x_cams, rand_x_cams = batches[1]
 				y = copy.deepcopy(x)
 				loss_dict = {}
 				if self.is_training_discriminator():
 					loss_dict = self.train_discriminator(batch)
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
-				# with torch.cuda.amp.autocast():
+
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
-				loss_dict = {**loss_dict, **enc_loss_dict}
+
+				
 
 				self.optimizer.zero_grad()
 				loss.backward()
+				# self.optimizer.step()
+
+				can_x, can_x_cams, rand_x, rand_x_cams = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device)
+		
+				rand_codes, rand_cams_hat = self.net.encoder(rand_x)
+				rand_codes = rand_codes + self.net.latent_avg.repeat(rand_codes.shape[0], 1, 1)
+				can_y_hat = self.net.decoder.synthesis(rand_codes, can_x_cams)['image']
+				can_y_hat = self.net.face_pool(can_y_hat)
+				
+				syn_loss, syn_loss_dict, syn_logs = self.calc_loss(rand_x,can_y_hat,can_x,rand_codes,rand_cams_hat,rand_x_cams)
+
+				# self.optimizer.zero_grad()
+				syn_loss.backward()
 				self.optimizer.step()
+
+				loss_dict = {**loss_dict, **enc_loss_dict, **syn_loss_dict}
 
 				if self.opts.rank == 0:
 					# Logging related
@@ -258,7 +284,7 @@ class Coach:
 			optimizer = Ranger(params, lr=self.opts.learning_rate)
 		return optimizer
 
-	def configure_datasets(self):
+	def configure_datasets(self, use_synthetic = False):
 		if self.opts.dataset_type not in data_configs.DATASETS.keys():
 			Exception(f'{self.opts.dataset_type} is not a valid dataset_type')
 		print(f'Loading dataset for {self.opts.dataset_type}')
@@ -273,11 +299,25 @@ class Coach:
 									  opts=self.opts,
 									  metadata = 'ffhq_dataset.json',
 									  is_train = False)
+
 		if self.opts.use_wandb:
 			self.wb_logger.log_dataset_wandb(train_dataset, dataset_name="Train")
 			self.wb_logger.log_dataset_wandb(test_dataset, dataset_name="Test")
+			
 		print(f"Number of training samples: {len(train_dataset)}")
 		print(f"Number of test samples: {len(test_dataset)}")
+
+		if use_synthetic:
+			synthetic_dataset = SyntheticDataset( dataset_path = self.opts.synthetic_dataset_path,
+												transform=transforms_dict['transform_gt_train'],
+												opts=self.opts,
+												metadata = 'synthetic_dataset.json',
+			)
+			if self.opts.use_wandb:
+				self.wb_logger.log_dataset_wandb(synthetic_dataset, dataset_name = "Synthetic")
+			print(f"Number of synthetic samples: {len(synthetic_dataset)}")
+
+			return train_dataset, test_dataset, synthetic_dataset
 		return train_dataset, test_dataset
 
 	def check_for_progressive_training_update(self, is_resume_from_ckpt=False):

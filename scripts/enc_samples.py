@@ -107,10 +107,12 @@ def run(
 
     os.makedirs(outdir, exist_ok=True)
 
-    test_opts = TestOptions().parse()
+    test_opts = TestOptions()
 
     ckpt = torch.load(network_pkl, map_location='cpu')
     opts = ckpt['opts']
+
+    test_opts.load_latent_avg = True
     
     opts.update(vars(test_opts))
     if 'learn_in_w' not in opts:
@@ -125,7 +127,7 @@ def run(
     trans = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        transforms.Resize((512,512))
+        transforms.Resize((256,256))
     ])
     intrinsics = FOV_to_intrinsics(18.837).cuda()
     cs = []
@@ -146,15 +148,14 @@ def run(
         image_name = im_path[:-4]
         temp_ws = []
         for i, c in enumerate(cs):
-            image = orig_image.crop(/Users/mer9ury/Desktop/ciplab/Encoder_for_3DGAN/latent_distribution/result1.png(i*512,0,(i+1)*512,512))
+            image = orig_image.crop((i*512,0,(i+1)*512,512))
             # c = torch.FloatTensor(c)
-            from_im = trans(image).cuda().reshape(1,3,512,512)
-            print(from_im.shape)
+            from_im = trans(image).cuda().reshape(1,3,256,256)
+
             id_image = torch.squeeze((from_im.cuda() + 1) / 2) * 255
-            
             w, cams = net.encoder(from_im)
-            w = w + net.latent_avg.repeat(codes.shape[0], 1)
-            print(w.shape)
+            w = w + net.latent_avg.repeat(w.shape[0], 1)
+            
             w = w.detach().cpu().numpy()
             temp_ws.append(w)
         temp_ws = np.concatenate(temp_ws)    

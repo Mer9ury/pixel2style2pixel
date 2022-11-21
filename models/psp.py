@@ -94,7 +94,6 @@ class pSp(nn.Module):
 
 	def forward(self, x,y_cams = None, resize=True, latent_mask=None, input_code=False, randomize_noise=True,
 	            inject_latent=None, return_latents=False, return_pose = False, alpha=None):
-
 		if input_code:
 			codes = x
 		else:
@@ -105,7 +104,7 @@ class pSp(nn.Module):
 					codes = codes + self.latent_avg.repeat(codes.shape[0], 1)
 				else:
 					codes = codes + self.latent_avg.repeat(codes.shape[0], 1, 1)
-
+		print(codes.shape)
 		if latent_mask is not None:
 			for i in latent_mask:
 				if inject_latent is not None:
@@ -115,8 +114,6 @@ class pSp(nn.Module):
 						codes[:, i] = inject_latent[:, i]
 				else:
 					codes[:, i] = 0
-
-
 		input_is_latent = not input_code
 		if y_cams:
 			images = self.decoder.synthesis(codes, y_cams)['image']

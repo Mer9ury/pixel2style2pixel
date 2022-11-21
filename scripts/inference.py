@@ -172,7 +172,9 @@ def run_on_batch(inputs, net, opts):
     return result_batch
 
 def run_on_batch_samples(inputs, net, opts):
+    print(inputs.shape)
     codes, cams = net.encoder(inputs)
+    print(codes.shape)
     ws = codes + net.latent_avg.repeat(codes.shape[0], 1)
     G = net.decoder
     angle_p = 0
