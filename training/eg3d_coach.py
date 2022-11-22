@@ -104,12 +104,10 @@ class Coach:
 		if opts.distributed:
 			self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,num_replicas=self.opts.num_gpus,
         rank=self.opts.rank)
-			self.test_sampler = torch.utils.data.distributed.DistributedSampler(self.test_dataset,num_replicas=self.opts.num_gpus,
-        rank=self.opts.rank),
 			self.synthetic_sampler = torch.utils.data.distributed.DistributedSampler(self.synthetic_dataset,num_replicas=self.opts.num_gpus,
         rank=self.opts.rank)
 		else:
-			self.train_sampler, self.test_sampler, self.synthetic_sampler = None, None, None
+			self.train_sampler, self.synthetic_sampler = None, None
 			
 		self.train_dataloader = DataLoader(self.train_dataset,
 										   batch_size=self.opts.batch_size,
@@ -120,9 +118,8 @@ class Coach:
 										   drop_last=True)
 		self.test_dataloader = DataLoader(self.test_dataset,
 										  batch_size=self.opts.test_batch_size,
-										  shuffle= self.test_sampler is None,
+										  shuffle= False,
 										  num_workers=int(self.opts.test_workers),
-										  sampler = self.test_sampler,
 										  pin_memory=True,
 										  drop_last=True)
 		self.synthetic_dataloader = DataLoader(self.synthetic_dataset,

@@ -2,8 +2,8 @@ OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 scrip
 --dataset_type=ffhq_encode \
 --exp_dir=experiments/1115_psp_synt \
 --workers=8 \
---batch_size=4 \
---test_batch_size=6 \
+--batch_size=24 \
+--test_batch_size=4 \
 --test_workers=4 \
 --val_interval=5000 \
 --save_interval=10000 \
