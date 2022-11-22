@@ -78,7 +78,7 @@ class Coach:
 		if self.opts.lpips_lambda > 0:
 			self.lpips_loss = LPIPS(net_type='alex',rank = self.opts.rank).cuda(self.opts.rank).eval()
 		if self.opts.id_lambda > 0:
-			self.id_loss = id_loss.IDLoss().eval()
+			self.id_loss = id_loss.IDLoss(self.opts.rank).eval()
 		if self.opts.w_norm_lambda > 0:
 			self.w_norm_loss = w_norm.WNormLoss(start_from_latent_avg=self.opts.start_from_latent_avg)
 		if self.opts.moco_lambda > 0:
@@ -105,9 +105,11 @@ class Coach:
 			self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,num_replicas=self.opts.num_gpus,
         rank=self.opts.rank)
 			self.test_sampler = torch.utils.data.distributed.DistributedSampler(self.test_dataset,num_replicas=self.opts.num_gpus,
+        rank=self.opts.rank),
+			self.synthetic_sampler = torch.utils.data.distributed.DistributedSampler(self.synthetic_dataset,num_replicas=self.opts.num_gpus,
         rank=self.opts.rank)
 		else:
-			self.train_sampler, self.test_sampler = None, None
+			self.train_sampler, self.test_sampler, self.synthetic_sampler = None, None, None
 			
 		self.train_dataloader = DataLoader(self.train_dataset,
 										   batch_size=self.opts.batch_size,
@@ -125,9 +127,9 @@ class Coach:
 										  drop_last=True)
 		self.synthetic_dataloader = DataLoader(self.synthetic_dataset,
 											batch_size=self.opts.batch_size,
-											shuffle= self.train_sampler is None,
+											shuffle= self.synthetic_sampler is None,
 											num_workers=int(self.opts.workers),
-											sampler = self.train_sampler,
+											sampler = self.synthetic_sampler,
 											pin_memory=True,
 											drop_last=True)
 			
@@ -167,23 +169,20 @@ class Coach:
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 
-				
-
-				self.optimizer.zero_grad()
-				loss.backward()
-				# self.optimizer.step()
-
 				can_x, can_x_cams, rand_x, rand_x_cams = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device)
 		
 				rand_codes, rand_cams_hat = self.net.encoder(rand_x)
 				rand_codes = rand_codes + self.net.latent_avg.repeat(rand_codes.shape[0], 1, 1)
+
 				can_y_hat = self.net.decoder.synthesis(rand_codes, can_x_cams)['image']
 				can_y_hat = self.net.face_pool(can_y_hat)
 				
 				syn_loss, syn_loss_dict, syn_logs = self.calc_loss(rand_x,can_y_hat,can_x,rand_codes,rand_cams_hat,rand_x_cams)
 
-				# self.optimizer.zero_grad()
-				syn_loss.backward()
+
+				self.optimizer.zero_grad()
+				total_loss = loss + syn_loss
+				total_loss.backward()
 				self.optimizer.step()
 
 				loss_dict = {**loss_dict, **enc_loss_dict, **syn_loss_dict}

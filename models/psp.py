@@ -77,9 +77,9 @@ class pSp(nn.Module):
 		else:
 
 			print('Loading encoders weights from irse50!')
-
-			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location='cpu')
-			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location='cpu')['G_ema']
+			print(self.opts.device)
+			encoder_ckpt = torch.load(model_paths['ir_se50'], map_location=self.opts.device)
+			decoder_ckpt = torch.load(model_paths['eg3d_pth'], map_location=self.opts.device)['G_ema']
 
 			# if input to encoder is not an RGB image, do not load the input layer weights
 			if self.opts.label_nc != 0:
@@ -104,7 +104,6 @@ class pSp(nn.Module):
 					codes = codes + self.latent_avg.repeat(codes.shape[0], 1)
 				else:
 					codes = codes + self.latent_avg.repeat(codes.shape[0], 1, 1)
-		print(codes.shape)
 		if latent_mask is not None:
 			for i in latent_mask:
 				if inject_latent is not None:

@@ -77,7 +77,7 @@ class TrainOptions:
 
 		# arguments for data distributed learning
 		self.parser.add_argument('--distributed', type=bool, default=False, help ='Whether distributed learning is used')
-		self.parser.add_argument('--num_gpus', type=int, default=-1, help ='the number of process(GPU)')
+		self.parser.add_argument('--num_gpus', type=int, default=4, help ='the number of process(GPU)')
 		self.parser.add_argument('--dist_backend', type=str, default='nccl', help ='dist_backend')
 		self.parser.add_argument('--rank', type=int, default= 0, help ='rank')
 	def parse(self):

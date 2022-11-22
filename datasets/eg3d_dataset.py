@@ -27,6 +27,7 @@ class EG3DDataset(Dataset):
 		return len(self.metadata)
 
 	def __getitem__(self, index):
+		print(index)
 		img_path = os.path.join(self.dataset_path,self.metadata[index]['path'])
 		from_im = Image.open(img_path)
 		from_im = from_im.convert('RGB')
