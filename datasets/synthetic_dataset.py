@@ -4,6 +4,7 @@ from utils import data_utils
 import torch
 import json
 import os
+import numpy as np
 
 class SyntheticDataset(Dataset):
 
@@ -13,6 +14,7 @@ class SyntheticDataset(Dataset):
 
         with open(metadata, "r") as f:
             self.metadata = json.load(f)
+        self.latents = np.load(os.path.join(dataset_path,'latent.npy'))
         self.transform = transform
 
 
@@ -21,6 +23,7 @@ class SyntheticDataset(Dataset):
 
     def __getitem__(self, index):
 
+        latent = self.latents[index]
         index = str(index%len(self.metadata))
 
         canonical_img_path = os.path.join(self.dataset_path,self.metadata[index]['canonical']['filename'])
@@ -38,4 +41,4 @@ class SyntheticDataset(Dataset):
         canonical_camera_param = torch.Tensor(self.metadata[index]['canonical']['camera_params'])
         random_camera_param = torch.Tensor(self.metadata[index]['random_1']['camera_params'])
 
-        return canonical_img, canonical_camera_param, random_img, random_camera_param
+        return canonical_img, canonical_camera_param, random_img, random_camera_param, latent

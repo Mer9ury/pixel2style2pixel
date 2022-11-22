@@ -1,4 +1,4 @@
-OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 scripts/train.py \
+OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=2,3 torchrun --nproc_per_node=2 scripts/train.py \
 --dataset_type=ffhq_encode \
 --exp_dir=experiments/1115_psp_synt \
 --workers=8 \

@@ -158,7 +158,7 @@ class Coach:
 			
 			for batch_idx, batches in enumerate(zip(tqdm(self.train_dataloader),self.synthetic_dataloader)):
 				x, y_cams = batches[0]
-				can_x, rand_x, can_x_cams, rand_x_cams = batches[1]
+				can_x, rand_x, can_x_cams, rand_x_cams, latent = batches[1]
 				y = copy.deepcopy(x)
 				loss_dict = {}
 				if self.is_training_discriminator():
@@ -169,7 +169,7 @@ class Coach:
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
 				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
 
-				can_x, can_x_cams, rand_x, rand_x_cams = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device)
+				can_x, can_x_cams, rand_x, rand_x_cams, latent_y = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device), latent.to(self.device)
 		
 				rand_codes, rand_cams_hat = self.net.encoder(rand_x)
 				rand_codes = rand_codes + self.net.latent_avg.repeat(rand_codes.shape[0], 1, 1)
@@ -179,6 +179,7 @@ class Coach:
 				
 				syn_loss, syn_loss_dict, syn_logs = self.calc_loss(rand_x,can_y_hat,can_x,rand_codes,rand_cams_hat,rand_x_cams)
 
+				latent_loss = self.mse_loss(rand_codes, latent_y)
 
 				self.optimizer.zero_grad()
 				total_loss = loss + syn_loss
