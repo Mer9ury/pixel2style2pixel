@@ -42,7 +42,7 @@ class IDLoss(nn.Module):
             x = x.unsqueeze(0).cuda()
             
         else:
-            x = x[:, :, 35:223, 32:220]  # Crop interesting region
+            # x = x[:, :, 35:223, 32:220]  # Crop interesting region
             x = self.face_pool(x)
 
         x_feats = self.facenet(x)

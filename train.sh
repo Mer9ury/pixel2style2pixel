@@ -1,16 +1,19 @@
 OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 scripts/train.py \
 --dataset_type=ffhq_encode \
---exp_dir=experiments/1115_psp_synt \
+--exp_dir=experiments/1130_e4e_synt \
 --workers=8 \
 --batch_size=24 \
 --test_batch_size=4 \
 --test_workers=4 \
 --val_interval=5000 \
 --save_interval=10000 \
---encoder_type=GradualStyleEncoder \
+--encoder_type=Encoder4Editing \
 --render_resolution=64 \
 --start_from_latent_avg \
 --lpips_lambda=0.8 \
+--use_w_pool \
+--w_discriminator_lambda 0.1 \
+--progressive_start 20000 \
 --l2_lambda=1 \
 --id_lambda=0.1 \
 --cams_lambda=0.1 \

@@ -155,34 +155,41 @@ class Coach:
 			
 			for batch_idx, batches in enumerate(zip(tqdm(self.train_dataloader),self.synthetic_dataloader)):
 				x, y_cams = batches[0]
-				can_x, rand_x, can_x_cams, rand_x_cams = batches[1]
+				can_x, rand_x, can_x_cams, rand_x_cams, latent = batches[1]
 				y = copy.deepcopy(x)
 				loss_dict = {}
+					
 				if self.is_training_discriminator():
-					loss_dict = self.train_discriminator(batch)
+					loss_dict = self.train_discriminator(batches[0])
 
 				x, y, y_cams = x.to(self.device),y.to(self.device).float(), y_cams.to(self.device)
 
 				y_hat, cams, latent = self.net.forward(x, return_latents=True)
-				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams)
-
-				can_x, can_x_cams, rand_x, rand_x_cams = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device)
-		
-				rand_codes, rand_cams_hat = self.net.encoder(rand_x)
-				rand_codes = rand_codes + self.net.latent_avg.repeat(rand_codes.shape[0], 1, 1)
-
-				can_y_hat = self.net.decoder.synthesis(rand_codes, can_x_cams)['image']
-				can_y_hat = self.net.face_pool(can_y_hat)
-				
-				syn_loss, syn_loss_dict, syn_logs = self.calc_loss(rand_x,can_y_hat,can_x,rand_codes,rand_cams_hat,rand_x_cams)
-
+				loss, enc_loss_dict, id_logs = self.calc_loss(x, y, y_hat, latent, cams, y_cams, self.global_step)
 
 				self.optimizer.zero_grad()
-				total_loss = loss + syn_loss
+				total_loss = loss
+				
+				if self.global_step > 10000:
+					can_x, can_x_cams, rand_x, rand_x_cams, latent_y = can_x.to(self.device), rand_x.to(self.device), can_x_cams.to(self.device), rand_x_cams.to(self.device), latent.to(self.device)
+		
+					rand_codes, rand_cams_hat = self.net.encoder(rand_x)
+					rand_codes = rand_codes + self.net.latent_avg.repeat(rand_codes.shape[0], 1, 1)
+
+					can_y_hat = self.net.decoder.synthesis(rand_codes, can_x_cams)['image']
+					can_y_hat = self.net.face_pool(can_y_hat)
+					
+					syn_loss, syn_loss_dict, syn_logs = self.calc_loss(rand_x,can_y_hat,can_x,rand_codes,rand_cams_hat,rand_x_cams, self.global_step)
+					total_loss += syn_loss
+
+					# latent_loss = self.mse_loss(rand_codes, latent_y)
+
+					# total_loss += latent_loss
+
 				total_loss.backward()
 				self.optimizer.step()
 
-				loss_dict = {**loss_dict, **enc_loss_dict, **syn_loss_dict}
+				loss_dict = {**loss_dict, **enc_loss_dict}
 
 				if self.opts.rank == 0:
 					# Logging related
@@ -323,7 +330,7 @@ class Coach:
 			if self.global_step == self.opts.progressive_steps[i]:   # Case training reached progressive step
 				self.net.encoder.set_progressive_stage(ProgressiveStage(i))
 
-	def calc_loss(self, x, y, y_hat, latent, cams, y_cams):
+	def calc_loss(self, x, y, y_hat, latent, cams, y_cams, global_step=10001):
 		loss_dict = {}
 		loss = 0.0
 		id_logs = None
@@ -339,37 +346,42 @@ class Coach:
 			loss_disc /= len(dims_to_discriminate)
 			loss_dict['encoder_discriminator_loss'] = float(loss_disc)
 			loss += self.opts.w_discriminator_lambda * loss_disc
-			
-		if self.opts.id_lambda > 0:
-			loss_id, sim_improvement, id_logs = self.id_loss(y_hat, y, x)
-			loss_dict['loss_id'] = float(loss_id)
-			loss_dict['id_improve'] = float(sim_improvement)
-			loss = loss_id * self.opts.id_lambda
-		if self.opts.l2_lambda > 0:
-			loss_l2 = F.mse_loss(y_hat, y)
-			loss_dict['loss_l2'] = float(loss_l2)
-			loss += loss_l2 * self.opts.l2_lambda
-		if self.opts.lpips_lambda > 0:
-			loss_lpips = self.lpips_loss(y_hat, y)
-			loss_dict['loss_lpips'] = float(loss_lpips)
-			loss += loss_lpips * self.opts.lpips_lambda
-		if self.opts.w_norm_lambda > 0:
-			loss_w_norm = self.w_norm_loss(latent, self.net.latent_avg)
-			loss_dict['loss_w_norm'] = float(loss_w_norm)
-			loss += loss_w_norm * self.opts.w_norm_lambda
-		if self.opts.moco_lambda > 0:
-			loss_moco, sim_improvement, id_logs = self.moco_loss(y_hat, y, x)
-			loss_dict['loss_moco'] = float(loss_moco)
-			loss_dict['id_improve'] = float(sim_improvement)
-			loss += loss_moco * self.opts.moco_lambda
+		loss = 0
+		if global_step > 10000:
+			if self.opts.id_lambda > 0:
+				loss_id, sim_improvement, id_logs = self.id_loss(y_hat, y, x)
+				loss_dict['loss_id'] = float(loss_id)
+				loss_dict['id_improve'] = float(sim_improvement)
+				loss = loss_id * self.opts.id_lambda
+			if self.opts.l2_lambda > 0:
+				loss_l2 = F.mse_loss(y_hat, y)
+				loss_dict['loss_l2'] = float(loss_l2)
+				loss += loss_l2 * self.opts.l2_lambda
+			if self.opts.lpips_lambda > 0:
+				loss_lpips = self.lpips_loss(y_hat, y)
+				loss_dict['loss_lpips'] = float(loss_lpips)
+				loss += loss_lpips * self.opts.lpips_lambda
+			if self.opts.w_norm_lambda > 0:
+				loss_w_norm = self.w_norm_loss(latent, self.net.latent_avg)
+				loss_dict['loss_w_norm'] = float(loss_w_norm)
+				loss += loss_w_norm * self.opts.w_norm_lambda
+			if self.opts.moco_lambda > 0:
+				loss_moco, sim_improvement, id_logs = self.moco_loss(y_hat, y, x)
+				loss_dict['loss_moco'] = float(loss_moco)
+				loss_dict['id_improve'] = float(sim_improvement)
+				loss += loss_moco * self.opts.moco_lambda
 		if self.opts.cams_lambda > 0:
 			extrinsics = cams[:,:16].reshape(-1,4,4)
 			y_extrinsics = y_cams[:,:16].reshape(-1,4,4)
+
 			loss_angle = self.geodesic_loss(extrinsics[:,:3,:3],y_extrinsics[:,:3,:3])
 			loss_trans = F.mse_loss(extrinsics[:,:3,3], y_extrinsics[:,:3,3])
+			
 			loss_cams = loss_angle + loss_trans
 			loss_dict['loss_cams'] = float(loss_cams)
 			loss += loss_cams * self.opts.cams_lambda
+		
+
 
 		if self.opts.progressive_steps and self.net.encoder.progressive_stage.value != 14:  # delta regularization loss
 			total_delta_loss = 0

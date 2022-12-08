@@ -14,7 +14,7 @@ class TestOptions:
 		self.parser.add_argument('--data_path', type=str, default='gt_images', help='Path to directory of images to evaluate')
 		self.parser.add_argument('--couple_outputs', action='store_true', help='Whether to also save inputs + outputs side-by-side')
 		self.parser.add_argument('--resize_outputs', action='store_true', help='Whether to resize outputs to 256x256 or keep at 1024x1024')
-		self.parser.add_argument('--render_resolution', default=128, type=int, help='Resoloution of neural rendering result')
+		self.parser.add_argument('--render_resolution', default=64, type=int, help='Resoloution of neural rendering result')
 		self.parser.add_argument('--load_latent_avg', action='store_true', help='Whether to use average latent vector to generate codes from pretrained model.')
 
 

@@ -42,9 +42,10 @@ def run():
     os.makedirs(out_path_results, exist_ok=True)
     os.makedirs(out_path_coupled, exist_ok=True)
 
-    # update test options with options used during training
+
     ckpt = torch.load(test_opts.checkpoint_path, map_location='cpu')
     opts = ckpt['opts']
+
     opts.update(vars(test_opts))
     if 'learn_in_w' not in opts:
         opts['learn_in_w'] = False
@@ -53,7 +54,10 @@ def run():
     opts = Namespace(**opts)
     sampling_multiplier = 2
     net = pSp(opts)
+    print(net.decoder.rendering_kwargs)
+    print(eg3d_config.rendering_kwargs)
     net.decoder.rendering_kwargs = eg3d_config.rendering_kwargs
+    
     net.decoder.rendering_kwargs['depth_resolution'] = int(net.decoder.rendering_kwargs['depth_resolution'] * sampling_multiplier)
     net.decoder.rendering_kwargs['depth_resolution_importance'] = int(
         net.decoder.rendering_kwargs['depth_resolution_importance'] * sampling_multiplier)
@@ -172,9 +176,9 @@ def run_on_batch(inputs, net, opts):
     return result_batch
 
 def run_on_batch_samples(inputs, net, opts):
-    print(inputs.shape)
+
     codes, cams = net.encoder(inputs)
-    print(codes.shape)
+
     ws = codes + net.latent_avg.repeat(codes.shape[0], 1)
     G = net.decoder
     angle_p = 0
@@ -182,7 +186,7 @@ def run_on_batch_samples(inputs, net, opts):
     recon_img = G.synthesis(ws, cams)['image']
 
     imgs = [recon_img]
-    for angle_y, angle_p in [(.3, angle_p), (0, angle_p), (-.3, angle_p)]:
+    for angle_y, angle_p in [(.34, angle_p), (.17, angle_p), (0, angle_p), (-.17, angle_p),  (-.34, angle_p)]:
         cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=opts.device)
         cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
         cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=opts.device)
@@ -191,10 +195,12 @@ def run_on_batch_samples(inputs, net, opts):
         conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
 
         img = G.synthesis(ws, camera_params)['image']
+        print(img.shape)
         imgs.append(img)
     img = torch.cat(imgs, dim=3)
 
     return img, recon_img, ws.detach().cpu().numpy()
+
 
 
 if __name__ == '__main__':

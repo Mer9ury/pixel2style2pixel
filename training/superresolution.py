@@ -278,7 +278,6 @@ class SuperresolutionHybrid8XDC(torch.nn.Module):
 
     def forward(self, rgb, x, ws, **block_kwargs):
         ws = ws[:, -1:, :].repeat(1, 3, 1)
-
         if x.shape[-1] != self.input_resolution:
             x = torch.nn.functional.interpolate(x, size=(self.input_resolution, self.input_resolution),
                                                   mode='bilinear', align_corners=False, antialias=self.sr_antialias)

@@ -50,6 +50,8 @@ class pSp(nn.Module):
 	def set_encoder(self):
 		if self.opts.encoder_type == 'GradualStyleEncoder':
 			encoder = psp_encoders.GradualStyleEncoder(50, 'ir_se', self.opts)
+		elif self.opts.encoder_type  == 'ProgressiveBackboneEncoder':
+			encoder = restyle_e4e_encoders.ProgressiveBackboneEncoder(50, 'ir_se', self.opts.n_styles, self.opts)
 		elif self.opts.encoder_type == 'Encoder4Editing':
 			encoder = psp_encoders.Encoder4Editing(50, 'ir_se', self.opts)
 		elif self.opts.encoder_type == 'BackboneEncoderUsingLastLayerIntoW':
